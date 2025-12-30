@@ -1,0 +1,5 @@
+rust-proxmox-icalendar (0.1.0-1) trixie; urgency=medium
+
+  * Initial release.
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 07 May 2026 15:39:26 +0200

@@ -22,6 +22,7 @@ members = [
     "proxmox-http",
     "proxmox-http-error",
     "proxmox-human-byte",
+    "proxmox-icalendar",
     "proxmox-ini",
     "proxmox-installer-types",
     "proxmox-io",
@@ -109,6 +110,7 @@ http-body-util = "0.1"
 hyper = "1"
 hyper-util = "0.1.12"
 iso8601 = "0.6.1"
+jiff = "0.2"
 ldap3 = { version = "0.11", default-features = false }
 lettre = "0.11.1"
 libc = "0.2.107"

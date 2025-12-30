@@ -1,0 +1,21 @@
+[package]
+name = "proxmox-icalendar"
+description = "Domain-free RFC 5545 (iCalendar) serializer"
+version = "0.1.0"
+
+authors.workspace = true
+edition.workspace = true
+exclude.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+keywords = ["icalendar", "ics", "rfc5545", "calendar", "vcalendar"]
+categories = ["encoding", "date-and-time"]
+
+[dependencies]
+# jiff supplies the DST-correct IANA wall-clock to UTC conversion for local
+# event times as well as the plain epoch-to-UTC formatting. chrono is avoided
+# for its panic-prone API and other design decisions this workspace rejects.
+jiff = { workspace = true }
