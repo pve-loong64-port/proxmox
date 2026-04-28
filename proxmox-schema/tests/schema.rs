@@ -455,6 +455,143 @@ fn test_one_of_schema_string_variant() {
 }
 
 #[test]
+fn test_property_aliases() {
+    const SCHEMA: ObjectSchema = ObjectSchema::new(
+        "Parameters.",
+        &[
+            ("count", true, &IntegerSchema::new("Count.").schema()),
+            ("mode", false, &StringSchema::new("Mode.").schema()),
+            (
+                "tags",
+                true,
+                &ArraySchema::new("Tags.", &StringSchema::new("Tag.").schema()).schema(),
+            ),
+        ],
+    )
+    .property_aliases(&[
+        ("deprecated-mode", "mode"),
+        ("legacy-mode", "mode"),
+        ("nr", "count"),
+        ("tag", "tags"),
+    ]);
+
+    let res = parse_query_string("mode=fast", &SCHEMA, true).expect("canonical");
+    assert_eq!(res["mode"], "fast");
+
+    let res = parse_query_string("deprecated-mode=fast", &SCHEMA, true).expect("alias");
+    assert_eq!(res["mode"], "fast");
+    assert!(
+        res.get("deprecated-mode").is_none(),
+        "alias key must be rewritten"
+    );
+
+    let res = parse_query_string("deprecated-mode=fast&nr=3", &SCHEMA, true).expect("aliases");
+    assert_eq!(res["mode"], "fast");
+    assert_eq!(res["count"], 3);
+
+    let err =
+        parse_query_string("mode=fast&deprecated-mode=slow", &SCHEMA, true).expect_err("conflict");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "unexpected error: {err}"
+    );
+
+    // Reverse order: alias first, canonical second. Must report the same conflict, not the
+    // generic "duplicate parameter" message.
+    let err = parse_query_string("deprecated-mode=fast&mode=slow", &SCHEMA, true)
+        .expect_err("reverse-order conflict");
+    let err_text = format!("{err}");
+    assert!(
+        err_text.contains("cannot set both"),
+        "reverse-order should report `cannot set both`, got: {err_text}"
+    );
+    assert!(
+        !err_text.contains("duplicate parameter"),
+        "reverse-order must not regress to `duplicate parameter`, got: {err_text}"
+    );
+
+    // Two distinct aliases of the same canonical: also rejected.
+    let err = parse_query_string("deprecated-mode=fast&legacy-mode=slow", &SCHEMA, true)
+        .expect_err("two-alias conflict");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "two aliases of same canonical must conflict: {err}"
+    );
+
+    // Array property via an alias works, and mixing alias with canonical for an array is also
+    // rejected (the bug that the array branch previously merged silently).
+    let res =
+        parse_query_string("mode=fast&tag=foo&tag=bar", &SCHEMA, true).expect("array via alias");
+    assert_eq!(res["tags"], json!(["foo", "bar"]));
+    let err =
+        parse_query_string("mode=fast&tag=foo&tags=bar", &SCHEMA, true).expect_err("array mix");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "array branch must reject set-both: {err}"
+    );
+
+    SCHEMA
+        .verify_json(&json!({"mode": "fast"}))
+        .expect("canonical verify");
+    SCHEMA
+        .verify_json(&json!({"deprecated-mode": "fast"}))
+        .expect("alias satisfies required");
+    SCHEMA
+        .verify_json(&json!({"mode": "fast", "deprecated-mode": "slow"}))
+        .expect_err("conflict via verify_json");
+
+    // canonicalize_aliases rewrites the alias key in place, so downstream consumers that look up
+    // only the canonical name see the value. This is what the REST server now does before
+    // dispatching the macro-generated handler.
+    let mut body = json!({"deprecated-mode": "fast"});
+    SCHEMA
+        .canonicalize_aliases(&mut body)
+        .expect("canonicalize rewrites alias");
+    assert_eq!(body["mode"], "fast");
+    assert!(body.get("deprecated-mode").is_none());
+
+    // canonicalize_aliases catches both-set and leaves the value unchanged.
+    let mut body = json!({"deprecated-mode": "fast", "mode": "slow"});
+    let original = body.clone();
+    SCHEMA
+        .canonicalize_aliases(&mut body)
+        .expect_err("canonicalize rejects both-set");
+    assert_eq!(body, original, "value must not be mutated on conflict");
+
+    // Same-canonical via two different aliases is also caught.
+    let mut body = json!({"deprecated-mode": "fast", "legacy-mode": "slow"});
+    SCHEMA
+        .canonicalize_aliases(&mut body)
+        .expect_err("canonicalize rejects two-alias");
+}
+
+#[test]
+fn test_property_aliases_in_all_of() {
+    const LEFT: Schema = ObjectSchema::new(
+        "Left.",
+        &[("mode", false, &StringSchema::new("Mode.").schema())],
+    )
+    .property_aliases(&[("legacy-mode", "mode")])
+    .schema();
+    const RIGHT: Schema = ObjectSchema::new(
+        "Right.",
+        &[("count", true, &IntegerSchema::new("Count.").schema())],
+    )
+    .schema();
+    const COMBINED: AllOfSchema = AllOfSchema::new("Combined.", &[&LEFT, &RIGHT]);
+
+    let res = parse_query_string("legacy-mode=fast", &COMBINED, true).expect("alias in allof");
+    assert_eq!(res["mode"], "fast");
+
+    let mut body = json!({"legacy-mode": "fast", "count": 1});
+    COMBINED
+        .canonicalize_aliases(&mut body)
+        .expect("canonicalize via AllOf");
+    assert_eq!(body["mode"], "fast");
+    assert!(body.get("legacy-mode").is_none());
+}
+
+#[test]
 #[should_panic(expected = "oneOf can have only zero or one string variants")]
 fn test_one_of_schema_with_multiple_string_variant() {
     const OBJECT1_SCHEMA: Schema = ObjectSchema::new(

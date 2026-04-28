@@ -195,6 +195,69 @@ pub fn parse_arguments<T: AsRef<str>>(
 }
 
 #[test]
+fn test_property_alias() {
+    const PARAMETERS: ObjectSchema = ObjectSchema::new(
+        "Parameters:",
+        &[("mode", false, &StringSchema::new("Mode.").schema())],
+    )
+    .property_aliases(&[("deprecated-mode", "mode"), ("legacy-mode", "mode")]);
+
+    let res = parse_arguments(
+        &["--legacy-mode", "fast"],
+        &[],
+        &HashMap::new(),
+        ParameterSchema::from(&PARAMETERS),
+    )
+    .expect("alias should be accepted");
+    assert_eq!(res.0["mode"], "fast");
+    assert!(res.0.get("legacy-mode").is_none());
+
+    let err = parse_arguments(
+        &["--mode", "fast", "--legacy-mode", "slow"],
+        &[],
+        &HashMap::new(),
+        ParameterSchema::from(&PARAMETERS),
+    )
+    .expect_err("specifying both canonical and alias should fail");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "canonical-first conflict text: {err}"
+    );
+
+    // Reverse order: alias first, canonical second. Must still report `cannot set both`,
+    // not the generic `duplicate parameter` message.
+    let err = parse_arguments(
+        &["--legacy-mode", "fast", "--mode", "slow"],
+        &[],
+        &HashMap::new(),
+        ParameterSchema::from(&PARAMETERS),
+    )
+    .expect_err("reverse-order should also fail");
+    let err_text = format!("{err}");
+    assert!(
+        err_text.contains("cannot set both"),
+        "reverse-order conflict text: {err_text}"
+    );
+    assert!(
+        !err_text.contains("duplicate parameter"),
+        "reverse-order must not regress to `duplicate parameter`: {err_text}"
+    );
+
+    // Two distinct aliases of the same canonical also conflict.
+    let err = parse_arguments(
+        &["--deprecated-mode", "fast", "--legacy-mode", "slow"],
+        &[],
+        &HashMap::new(),
+        ParameterSchema::from(&PARAMETERS),
+    )
+    .expect_err("two aliases of same canonical should fail");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "two-alias conflict text: {err}"
+    );
+}
+
+#[test]
 fn test_boolean_arg() {
     const PARAMETERS: ObjectSchema = ObjectSchema::new(
         "Parameters:",

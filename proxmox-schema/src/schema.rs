@@ -666,6 +666,61 @@ const fn assert_properties_sorted(properties: SchemaPropertyMap) {
     }
 }
 
+const fn property_map_contains(properties: SchemaPropertyMap, needle: &'static str) -> bool {
+    use std::cmp::Ordering;
+
+    let mut i = 0;
+    while i != properties.len() {
+        if let Ordering::Equal =
+            crate::const_test_utils::byte_string_cmp(properties[i].0.as_bytes(), needle.as_bytes())
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn assert_key_not_alias(key: &str, aliases: PropertyAliasMap) {
+    use std::cmp::Ordering;
+
+    let mut i = 0;
+    while i != aliases.len() {
+        let (alias, _) = aliases[i];
+        if let Ordering::Equal =
+            crate::const_test_utils::byte_string_cmp(alias.as_bytes(), key.as_bytes())
+        {
+            panic!("key must reference a canonical property, not an alias");
+        }
+        i += 1;
+    }
+}
+
+const fn assert_property_aliases_valid(aliases: PropertyAliasMap, properties: SchemaPropertyMap) {
+    use std::cmp::Ordering;
+
+    let mut i = 0;
+    let mut prev = None::<&'static str>;
+    while i != aliases.len() {
+        let (alias, target) = aliases[i];
+        if let Some(prev) = prev {
+            match crate::const_test_utils::byte_string_cmp(prev.as_bytes(), alias.as_bytes()) {
+                Ordering::Greater => panic!("property aliases must be sorted by alias name"),
+                Ordering::Equal => panic!("duplicate property alias not allowed"),
+                Ordering::Less => (),
+            }
+        }
+        if property_map_contains(properties, alias) {
+            panic!("property alias shadows an existing property of the same name");
+        }
+        if !property_map_contains(properties, target) {
+            panic!("property alias must target an existing property");
+        }
+        prev = Some(alias);
+        i += 1;
+    }
+}
+
 /// Legacy property strings may contain shortcuts where the *value* of a specific key is used as a
 /// *key* for yet another option. Most notably, PVE's `netX` properties use `<model>=<macaddr>`
 /// instead of `model=<model>,macaddr=<macaddr>`.
@@ -691,6 +746,11 @@ impl KeyAliasInfo {
     }
 }
 
+/// Deprecated-name to canonical-name mapping for object properties.
+///
+/// Stored sorted by alias name so a binary search can resolve aliases during schema lookup.
+pub type PropertyAliasMap = &'static [(&'static str, &'static str)];
+
 /// Data type to describe objects (maps).
 #[derive(Debug)]
 #[cfg_attr(feature = "test-harness", derive(Eq, PartialEq))]
@@ -704,6 +764,12 @@ pub struct ObjectSchema {
     pub properties: SchemaPropertyMap,
     /// Default key name - used by `parse_parameter_string()`
     pub default_key: Option<&'static str>,
+    /// Deprecated property names that resolve to a canonical property in `properties`.
+    ///
+    /// Each entry is `(alias, canonical)`. Lookups for `alias` behave as if `canonical` had been
+    /// used. Parameter parsing rewrites the alias to the canonical name; specifying both at the
+    /// same time is rejected with a "cannot set both" error.
+    pub property_aliases: PropertyAliasMap,
     /// DO NOT USE!
     ///
     /// This is meant for the PVE schema generator ONLY!
@@ -764,6 +830,7 @@ impl ObjectSchema {
             properties,
             additional_properties: false,
             default_key: None,
+            property_aliases: &[],
             key_alias_info: None,
         }
     }
@@ -774,6 +841,7 @@ impl ObjectSchema {
     }
 
     pub const fn default_key(mut self, key: &'static str) -> Self {
+        assert_key_not_alias(key, self.property_aliases);
         self.default_key = Some(key);
         self
     }
@@ -783,6 +851,7 @@ impl ObjectSchema {
     }
 
     pub fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+        let key = self.lookup_alias(key).unwrap_or(key);
         if let Ok(ind) = self
             .properties
             .binary_search_by_key(&key, |(name, _, _)| name)
@@ -792,6 +861,17 @@ impl ObjectSchema {
         } else {
             None
         }
+    }
+
+    /// Resolve a deprecated property name to its canonical name.
+    ///
+    /// Returns `None` if `key` is not registered as an alias.
+    pub fn lookup_alias(&self, key: &str) -> Option<&'static str> {
+        let idx = self
+            .property_aliases
+            .binary_search_by_key(&key, |(alias, _)| alias)
+            .ok()?;
+        Some(self.property_aliases[idx].1)
     }
 
     /// Parse key/value pairs and verify with object schema
@@ -804,6 +884,61 @@ impl ObjectSchema {
         test_required: bool,
     ) -> Result<Value, ParameterError> {
         ParameterSchema::from(self).parse_parameter_strings(data, test_required)
+    }
+
+    /// Register deprecated property names that resolve to a canonical property.
+    ///
+    /// Use this to keep an old name accepted after renaming a property: pass
+    /// `&[("old-name", "new-name")]` to make CLI flags, property strings, and JSON inputs that
+    /// still use `old-name` keep working, while the schema and documentation present only
+    /// `new-name`.
+    ///
+    /// The alias list must be sorted by alias name. Each alias must not shadow an existing
+    /// property and must point to an existing property; both are checked at compile time.
+    ///
+    /// ```
+    /// # use proxmox_schema::{ObjectSchema, Schema, StringSchema};
+    /// const SCHEMA: Schema = ObjectSchema::new(
+    ///     "Some Object",
+    ///     &[("mode", false, &StringSchema::new("Mode").schema())],
+    /// )
+    /// .property_aliases(&[("legacy-mode", "mode")])
+    /// .schema();
+    /// ```
+    ///
+    /// Aliases that target a non-existent property are rejected:
+    ///
+    /// ```compile_fail,E0080
+    /// # use proxmox_schema::{ObjectSchema, Schema, StringSchema};
+    /// const SCHEMA: Schema = ObjectSchema::new(
+    ///     "Some Object",
+    ///     &[("mode", false, &StringSchema::new("Mode").schema())],
+    /// )
+    /// .property_aliases(&[("legacy", "missing")])
+    /// .schema();
+    /// ```
+    ///
+    /// Aliases must not shadow an existing property:
+    ///
+    /// ```compile_fail,E0080
+    /// # use proxmox_schema::{ObjectSchema, Schema, StringSchema};
+    /// const SCHEMA: Schema = ObjectSchema::new(
+    ///     "Some Object",
+    ///     &[
+    ///         ("mode", false, &StringSchema::new("Mode").schema()),
+    ///         ("name", false, &StringSchema::new("Name").schema()),
+    ///     ],
+    /// )
+    /// .property_aliases(&[("name", "mode")])
+    /// .schema();
+    /// ```
+    pub const fn property_aliases(mut self, aliases: PropertyAliasMap) -> Self {
+        assert_property_aliases_valid(aliases, self.properties);
+        if let Some(default_key) = self.default_key {
+            assert_key_not_alias(default_key, aliases);
+        }
+        self.property_aliases = aliases;
+        self
     }
 
     /// DO NOT USE!
@@ -1140,6 +1275,65 @@ pub trait ObjectSchemaType: private::Sealed + Send + Sync {
     fn additional_properties(&self) -> bool;
     fn default_key(&self) -> Option<&'static str>;
 
+    /// Resolve a deprecated property name to its canonical name.
+    ///
+    /// Schemas that have no aliases (the common case) inherit the default `None` here.
+    fn lookup_alias(&self, _key: &str) -> Option<&'static str> {
+        None
+    }
+
+    /// Rewrite deprecated alias keys in `value` to their canonical names.
+    ///
+    /// For object values, every key registered via [`ObjectSchema::property_aliases`] is renamed
+    /// to its canonical name. If both an alias and its canonical (or two different aliases of
+    /// the same canonical) are present, a `cannot set both` [`ParameterError`] is returned and
+    /// `value` is left unchanged.
+    ///
+    /// Callers handing the resulting [`Value`] to API handlers generated by `#[api]` (which look
+    /// up properties by canonical name only) must call this before verification and dispatch;
+    /// otherwise the alias key passes [`verify_json`](Self::verify_json) but the downstream
+    /// handler reports the canonical as missing.
+    ///
+    /// No-op for schemas with no declared aliases and for non-object values.
+    fn canonicalize_aliases(&self, value: &mut Value) -> Result<(), Error> {
+        let Some(map) = value.as_object_mut() else {
+            return Ok(());
+        };
+        let aliases: Vec<(String, &'static str)> = map
+            .keys()
+            .filter_map(|k| self.lookup_alias(k).map(|c| (k.clone(), c)))
+            .collect();
+        if aliases.is_empty() {
+            return Ok(());
+        }
+        // Pre-flight: detect conflicts before mutating, so the value stays untouched on error.
+        let mut errors = ParameterError::new();
+        let mut seen_canonical: HashSet<&'static str> = HashSet::new();
+        for (alias_key, canonical) in &aliases {
+            if map.contains_key(*canonical) {
+                errors.push(
+                    alias_key.clone(),
+                    format_err!("cannot set both `{canonical}` and `{alias_key}`."),
+                );
+            } else if !seen_canonical.insert(canonical) {
+                errors.push(
+                    alias_key.clone(),
+                    format_err!(
+                        "cannot set both `{alias_key}` and another alias of `{canonical}`."
+                    ),
+                );
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors.into());
+        }
+        for (alias_key, canonical) in aliases {
+            let v = map.remove(&alias_key).expect("alias key was just observed");
+            map.insert(canonical.to_string(), v);
+        }
+        Ok(())
+    }
+
     /// Should always return `None`, unless dealing with *legacy* PVE property strings.
     fn key_alias_info(&self) -> Option<KeyAliasInfo> {
         None
@@ -1157,7 +1351,28 @@ pub trait ObjectSchemaType: private::Sealed + Send + Sync {
 
         let additional_properties = self.additional_properties();
 
+        // Track canonical names already seen via an alias to also catch two distinct aliases
+        // of the same canonical being set at once. Callers going through
+        // [`canonicalize_aliases`](Self::canonicalize_aliases) before `verify_json` find no
+        // aliases left in the map and skip these branches entirely.
+        let mut seen_alias_canonical: HashSet<&'static str> = HashSet::new();
         for (key, value) in map {
+            if let Some(canonical) = self.lookup_alias(key) {
+                if map.contains_key(canonical) {
+                    errors.push(
+                        key.to_string(),
+                        format_err!("cannot set both `{canonical}` and `{key}`."),
+                    );
+                    continue;
+                }
+                if !seen_alias_canonical.insert(canonical) {
+                    errors.push(
+                        key.to_string(),
+                        format_err!("cannot set both `{key}` and another alias of `{canonical}`."),
+                    );
+                    continue;
+                }
+            }
             if let Some((_optional, prop_schema)) = self.lookup(key) {
                 if let Err(err) = prop_schema.verify_json(value) {
                     errors.add_errors(key, err);
@@ -1171,12 +1386,21 @@ pub trait ObjectSchemaType: private::Sealed + Send + Sync {
         }
 
         for (name, optional, _prop_schema) in self.properties() {
-            if !(*optional) && data[name] == Value::Null {
-                errors.push(
-                    name.to_string(),
-                    format_err!("property is missing and it is not optional"),
-                );
+            if *optional || data[name] != Value::Null {
+                continue;
             }
+            // a present alias satisfies the required-property check
+            if map
+                .keys()
+                .filter_map(|k| self.lookup_alias(k))
+                .any(|canon| canon == *name)
+            {
+                continue;
+            }
+            errors.push(
+                name.to_string(),
+                format_err!("property is missing and it is not optional"),
+            );
         }
 
         if !errors.is_empty() {
@@ -1229,6 +1453,10 @@ impl ObjectSchemaType for ObjectSchema {
         self.default_key
     }
 
+    fn lookup_alias(&self, key: &str) -> Option<&'static str> {
+        ObjectSchema::lookup_alias(self, key)
+    }
+
     fn key_alias_info(&self) -> Option<KeyAliasInfo> {
         self.key_alias_info
     }
@@ -1273,6 +1501,19 @@ impl ObjectSchemaType for AllOfSchema {
         }
 
         None
+    }
+
+    /// Iterates branches left-to-right and returns the first match (`find_map`). Branches that
+    /// declare conflicting alias targets for the same alias name are not detected here; in
+    /// practice this is unlikely to come up, since AllOf branches are usually disjoint by
+    /// design.
+    fn lookup_alias(&self, key: &str) -> Option<&'static str> {
+        self.list.iter().find_map(|schema| {
+            schema
+                .any_object()
+                .expect("non-object-schema in `AllOfSchema`")
+                .lookup_alias(key)
+        })
     }
 }
 
@@ -1339,6 +1580,16 @@ impl ObjectSchemaType for OneOfSchema {
 
     fn default_key(&self) -> Option<&'static str> {
         None
+    }
+
+    fn lookup_alias(&self, key: &str) -> Option<&'static str> {
+        self.list.iter().find_map(|(_, schema)| match schema {
+            Schema::String(_) => None,
+            _ => schema
+                .any_object()
+                .expect("non-object-schema in `OneOfSchema`")
+                .lookup_alias(key),
+        })
     }
 
     fn verify_json(&self, data: &Value) -> Result<(), Error> {
@@ -1984,6 +2235,14 @@ impl ObjectSchemaType for ParameterSchema {
             ParameterSchema::OneOf(o) => o.default_key(),
         }
     }
+
+    fn lookup_alias(&self, key: &str) -> Option<&'static str> {
+        match self {
+            ParameterSchema::Object(o) => o.lookup_alias(key),
+            ParameterSchema::AllOf(o) => o.lookup_alias(key),
+            ParameterSchema::OneOf(o) => o.lookup_alias(key),
+        }
+    }
 }
 
 impl From<&'static ObjectSchema> for ParameterSchema {
@@ -2027,7 +2286,31 @@ fn do_parse_parameter_strings(
 
     let additional_properties = schema.additional_properties();
 
-    for (key, value) in data {
+    // Track the first raw key that wrote to each canonical key. Used to detect mixing of an
+    // alias and its canonical (or two different aliases) regardless of scalar vs. array.
+    let mut first_raw = HashMap::<String, String>::new();
+
+    for (raw_key, value) in data {
+        let (key, alias_from): (&str, Option<&str>) = match schema.lookup_alias(raw_key) {
+            Some(canonical) => (canonical, Some(raw_key.as_str())),
+            None => (raw_key.as_str(), None),
+        };
+        // Reject mixing an alias with its canonical (or two distinct aliases of the same
+        // canonical) before any mutation. The same raw_key appearing again is *not* a mix
+        // and falls through to the per-arm logic below (legitimate for arrays, rejected as
+        // `duplicate parameter` for scalars).
+        if let Some(prev_raw) = first_raw.get(key) {
+            if prev_raw != raw_key.as_str() {
+                let other = alias_from.unwrap_or(prev_raw.as_str());
+                errors.push(
+                    raw_key.into(),
+                    format_err!("cannot set both `{key}` and `{other}`."),
+                );
+                continue;
+            }
+        } else {
+            first_raw.insert(key.to_string(), raw_key.clone());
+        }
         if let Some((_optional, prop_schema)) = schema.lookup(key) {
             match prop_schema {
                 Schema::Array(array_schema) => {
@@ -2038,10 +2321,13 @@ fn do_parse_parameter_strings(
                         Value::Array(ref mut array) => {
                             match array_schema.items.parse_simple_value(value) {
                                 Ok(res) => array.push(res), // fixme: check_length??
-                                Err(err) => errors.push(key.into(), err),
+                                Err(err) => errors.push(raw_key.into(), err),
                             }
                         }
-                        _ => errors.push(key.into(), format_err!("expected array - type mismatch")),
+                        _ => errors.push(
+                            raw_key.into(),
+                            format_err!("expected array - type mismatch"),
+                        ),
                     }
                 }
                 _ => match prop_schema.parse_simple_value(value) {
@@ -2049,10 +2335,10 @@ fn do_parse_parameter_strings(
                         if params[key] == Value::Null {
                             params[key] = res;
                         } else {
-                            errors.push(key.into(), format_err!("duplicate parameter."));
+                            errors.push(raw_key.into(), format_err!("duplicate parameter."));
                         }
                     }
-                    Err(err) => errors.push(key.into(), err),
+                    Err(err) => errors.push(raw_key.into(), err),
                 },
             }
         } else if additional_properties {
@@ -2081,12 +2367,13 @@ fn do_parse_parameter_strings(
 
     if test_required && errors.is_empty() {
         for (name, optional, _prop_schema) in schema.properties() {
-            if !(*optional) && params[name] == Value::Null {
-                errors.push(
-                    name.to_string(),
-                    format_err!("parameter is missing and it is not optional."),
-                );
+            if *optional || params[name] != Value::Null {
+                continue;
             }
+            errors.push(
+                name.to_string(),
+                format_err!("parameter is missing and it is not optional."),
+            );
         }
     }
 
