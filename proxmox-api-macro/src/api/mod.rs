@@ -364,6 +364,14 @@ impl SchemaItem {
                 {
                     ts.extend(quote_spanned! { obj.span => .additional_properties(true) });
                 }
+                if !obj.property_aliases.is_empty() {
+                    let pairs = obj.property_aliases.iter().map(|(alias, target)| {
+                        quote! { (#alias, #target) }
+                    });
+                    ts.extend(quote_spanned! { obj.span =>
+                        .property_aliases(&[#( #pairs ),*])
+                    });
+                }
             }
             SchemaItem::Array(array) => {
                 let description = check_description()?;
@@ -528,6 +536,8 @@ pub struct SchemaObject {
     span: Span,
     properties_: Vec<ObjectEntry>,
     additional_properties: Option<AdditionalProperties>,
+    /// Deprecated property names that map to a canonical property, sorted by alias name.
+    property_aliases: Vec<(syn::LitStr, syn::LitStr)>,
 }
 
 #[derive(Clone)]
@@ -580,6 +590,7 @@ impl SchemaObject {
             span,
             properties_: Vec::new(),
             additional_properties: None,
+            property_aliases: Vec::new(),
         }
     }
 
@@ -629,48 +640,68 @@ impl SchemaObject {
     }
 
     fn try_extract_from(obj: &mut JSONObject) -> Result<Self, syn::Error> {
+        let mut property_aliases = Vec::new();
+        let properties_ = obj
+            .remove_required_element("properties")?
+            .into_object("object field definition")?
+            .into_iter()
+            .try_fold(
+                Vec::new(),
+                |mut properties, (key, value)| -> Result<_, syn::Error> {
+                    let mut schema: JSONObject =
+                        value.into_object("schema definition for field")?;
+
+                    if let Some(target) = schema.remove("alias") {
+                        if !schema.is_empty() {
+                            let extra = schema.keys().next().expect("non-empty checked above");
+                            bail!(
+                                extra.span(),
+                                "`alias` property entry must not carry other attributes \
+                                 (offending key: `{}`)",
+                                extra.as_str(),
+                            );
+                        }
+                        let target: syn::LitStr = target.try_into()?;
+                        let alias = syn::LitStr::new(key.as_str(), key.span());
+                        property_aliases.push((alias, target));
+                        return Ok(properties);
+                    }
+
+                    let optional: bool = schema
+                        .remove("optional")
+                        .map(|opt| -> Result<bool, syn::Error> {
+                            let v: syn::LitBool = opt.try_into()?;
+                            Ok(v.value)
+                        })
+                        .transpose()?
+                        .unwrap_or(false);
+
+                    let flatten: Option<Span> = schema
+                        .remove_entry("flatten")
+                        .map(|(field, value)| -> Result<(Span, bool), syn::Error> {
+                            let v: syn::LitBool = value.try_into()?;
+                            Ok((field.span(), v.value))
+                        })
+                        .transpose()?
+                        .and_then(|(span, value)| if value { Some(span) } else { None });
+
+                    properties.push(
+                        ObjectEntry::new(key, optional, schema.try_into()?).with_flatten(flatten),
+                    );
+
+                    Ok(properties)
+                },
+            )?;
+        property_aliases.sort_by(|a, b| a.0.value().cmp(&b.0.value()));
+
         let mut this = Self {
             span: obj.span(),
             additional_properties: obj
                 .remove("additional_properties")
                 .map(AdditionalProperties::try_from)
                 .transpose()?,
-            properties_: obj
-                .remove_required_element("properties")?
-                .into_object("object field definition")?
-                .into_iter()
-                .try_fold(
-                    Vec::new(),
-                    |mut properties, (key, value)| -> Result<_, syn::Error> {
-                        let mut schema: JSONObject =
-                            value.into_object("schema definition for field")?;
-
-                        let optional: bool = schema
-                            .remove("optional")
-                            .map(|opt| -> Result<bool, syn::Error> {
-                                let v: syn::LitBool = opt.try_into()?;
-                                Ok(v.value)
-                            })
-                            .transpose()?
-                            .unwrap_or(false);
-
-                        let flatten: Option<Span> = schema
-                            .remove_entry("flatten")
-                            .map(|(field, value)| -> Result<(Span, bool), syn::Error> {
-                                let v: syn::LitBool = value.try_into()?;
-                                Ok((field.span(), v.value))
-                            })
-                            .transpose()?
-                            .and_then(|(span, value)| if value { Some(span) } else { None });
-
-                        properties.push(
-                            ObjectEntry::new(key, optional, schema.try_into()?)
-                                .with_flatten(flatten),
-                        );
-
-                        Ok(properties)
-                    },
-                )?,
+            property_aliases,
+            properties_,
         };
         this.sort_properties();
         Ok(this)

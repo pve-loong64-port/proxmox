@@ -101,6 +101,44 @@ fn more_async_params_schema_check() {
 #[api(
     input: {
         properties: {
+            "verify-mode": {
+                type: String,
+                description: "Verification mode.",
+            },
+            verify: {
+                alias: "verify-mode",
+            },
+        },
+    },
+)]
+/// Take a deprecated alias.
+pub async fn aliased_parameter(param: Value) -> Result<(), Error> {
+    let _ = param;
+    Ok(())
+}
+
+#[test]
+fn aliased_parameter_check() {
+    const TEST_METHOD: ::proxmox_router::ApiMethod = ::proxmox_router::ApiMethod::new(
+        &::proxmox_router::ApiHandler::Async(&api_function_aliased_parameter),
+        &::proxmox_schema::ObjectSchema::new(
+            "Take a deprecated alias.",
+            &[(
+                "verify-mode",
+                false,
+                &::proxmox_schema::StringSchema::new("Verification mode.").schema(),
+            )],
+        )
+        .property_aliases(&[("verify", "verify-mode")]),
+    )
+    .protected(false);
+
+    assert_eq!(TEST_METHOD, API_METHOD_ALIASED_PARAMETER);
+}
+
+#[api(
+    input: {
+        properties: {
             type: {
                 type: String,
                 description: "The great Foo",

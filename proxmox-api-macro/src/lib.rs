@@ -210,6 +210,48 @@ fn router_do(item: TokenStream) -> Result<TokenStream, Error> {
     }
     ```
 
+    # Deprecated property aliases
+
+    Use this when a property has been renamed and you want to keep the old name accepted for
+    one release cycle (a deprecation window) without exposing it in the public schema or in
+    generated documentation. If there are no external consumers of the old name, just rename
+    the property and skip the alias.
+
+    Declare a property entry with only an `alias:` key to keep the old name accepted. The form
+    mirrors PVE's Perl `JSONSchema.pm`:
+
+    ```
+    # use proxmox_api_macro::api;
+    # use serde::{Deserialize, Serialize};
+    #[api(
+        properties: {
+            "verify-mode": {
+                description: "Verification mode.",
+                type: String,
+            },
+            verify: { alias: "verify-mode" },
+        },
+    )]
+    #[derive(Deserialize, Serialize)]
+    /// A config with a renamed property.
+    pub struct Config {
+        #[serde(rename = "verify-mode")]
+        pub verify_mode: String,
+    }
+    ```
+
+    **Scope.** Aliases are honoured by code paths that go through `ObjectSchemaType::lookup` and
+    `canonicalize_aliases`, namely CLI getopts, property-string parsing, query/form parameter
+    parsing, and the REST server JSON-body dispatch (which calls `canonicalize_aliases` before
+    invoking the macro-generated handler). They are **not** seen by serde directly: calling
+    `serde_json::from_value::<Config>(json!({"verify": "fast"}))` fails. Similarly, the
+    `#[derive(Updater)]` derive ignores aliases. Structs do not need `#[serde(alias)]` for the
+    schema alias to work end-to-end through the REST stack, but they must continue to accept
+    the canonical name.
+
+    Mixing the alias and the canonical (or two distinct aliases of the same canonical) in one
+    request is rejected with a `cannot set both` error.
+
     Note that when writing out parts or all of the schema manually, the schema itself has to
     contain the already renamed fields!
 
