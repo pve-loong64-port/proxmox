@@ -579,6 +579,9 @@ async fn get_request_parameters<S: 'static + BuildHasher + Send>(
                 params[&k] = prop_schema.parse_simple_value(&v)?;
             }
         }
+        // Rewrite deprecated alias keys to their canonical names before verification, so
+        // macro-generated handlers see only canonical names.
+        param_schema.canonicalize_aliases(&mut params)?;
         param_schema.verify_json(&params)?;
         Ok(params)
     } else {
