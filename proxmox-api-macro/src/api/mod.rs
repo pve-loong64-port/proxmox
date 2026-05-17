@@ -617,6 +617,11 @@ impl SchemaObject {
         &mut self.properties_
     }
 
+    #[inline]
+    pub fn property_aliases(&self) -> &[(syn::LitStr, syn::LitStr)] {
+        &self.property_aliases
+    }
+
     fn drain_filter<F>(&mut self, mut func: F) -> Vec<ObjectEntry>
     where
         F: FnMut(&ObjectEntry) -> bool,

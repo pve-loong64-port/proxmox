@@ -267,6 +267,47 @@ fn handle_regular_struct(
         );
     }
 
+    // Auto-inject `#[serde(alias = "<old>")]` on the field matching each declared deprecated
+    // alias so direct serde-driven deserialization (section_config, `serde_json::from_value`,
+    // ...) accepts the old name end-to-end without the caller having to maintain the alias
+    // list in two places. Field matching uses the effective serde name (`rename` /
+    // `rename_all` / ident).
+    let aliases: Vec<(String, syn::LitStr)> = match &schema.item {
+        SchemaItem::Object(obj) => obj
+            .property_aliases()
+            .iter()
+            .map(|(alias, target)| (target.value(), alias.clone()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    if !aliases.is_empty() {
+        if let syn::Fields::Named(fields) = &mut stru.fields {
+            for field in &mut fields.named {
+                let attrs = serde::FieldAttrib::try_from(&field.attrs[..])?;
+                let Some(ident) = field.ident.as_ref() else {
+                    continue;
+                };
+                let effective_name = if let Some(renamed) = &attrs.rename {
+                    renamed.value()
+                } else if let Some(rename_all) = container_attrs.rename_all {
+                    rename_all.apply_to_field(&ident.to_string())
+                } else {
+                    ident.to_string()
+                };
+                for (target, alias) in &aliases {
+                    if *target != effective_name {
+                        continue;
+                    }
+                    let alias_value = alias.value();
+                    let alias_lit = syn::LitStr::new(&alias_value, ident.span());
+                    field.attrs.push(syn::parse_quote_spanned! {ident.span() =>
+                        #[serde(alias = #alias_lit)]
+                    });
+                }
+            }
+        }
+    }
+
     {
         let obj = schema.item.check_object_mut()?;
         // remove flattened fields

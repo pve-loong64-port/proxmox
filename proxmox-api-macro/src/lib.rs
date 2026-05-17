@@ -240,17 +240,22 @@ fn router_do(item: TokenStream) -> Result<TokenStream, Error> {
     }
     ```
 
-    **Scope.** Aliases are honoured by code paths that go through `ObjectSchemaType::lookup` and
-    `canonicalize_aliases`, namely CLI getopts, property-string parsing, query/form parameter
-    parsing, and the REST server JSON-body dispatch (which calls `canonicalize_aliases` before
-    invoking the macro-generated handler). They are **not** seen by serde directly: calling
-    `serde_json::from_value::<Config>(json!({"verify": "fast"}))` fails. Similarly, the
-    `#[derive(Updater)]` derive ignores aliases. Structs do not need `#[serde(alias)]` for the
-    schema alias to work end-to-end through the REST stack, but they must continue to accept
-    the canonical name.
+    **Scope.** Aliases are honored on three layers:
+
+    - The *schema* sidecar (`ObjectSchema::property_aliases`), used by `lookup` and
+      `canonicalize_aliases`. This covers CLI getopts, property-string parsing, query and form
+      parameter parsing, the REST-server JSON-body dispatch, and `proxmox-section-config`
+      parsing, all of which rewrite the alias to the canonical name before validation.
+    - *Serde*: a `#[serde(alias = "...")]` attribute is auto-emitted on the canonical struct
+      field, so direct serde-driven paths (`serde_json::from_value::<Config>`, TOML,
+      `convert_to_typed_array`, ...) accept the deprecated name without further plumbing.
+
+    The `#[derive(Updater)]` derive is not currently alias-aware. The Updater struct only
+    accepts the canonical name.
 
     Mixing the alias and the canonical (or two distinct aliases of the same canonical) in one
-    request is rejected with a `cannot set both` error.
+    schema-validated request is rejected with a `cannot set both` error. Direct serde calls
+    will silently accept whichever key serde encounters last.
 
     Note that when writing out parts or all of the schema manually, the schema itself has to
     contain the already renamed fields!

@@ -281,3 +281,34 @@ fn enum_with_other() {
         .check_constraints("any string")
         .expect("check_constraints on 'other' value failed");
 }
+
+#[api(
+    properties: {
+        "verify-mode": {
+            description: "Verification mode.",
+            type: String,
+        },
+        verify: { alias: "verify-mode" },
+        legacy: { alias: "verify-mode" },
+    },
+)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+/// Config with a deprecated property name.
+pub struct AliasedStruct {
+    #[serde(rename = "verify-mode")]
+    pub verify_mode: String,
+}
+
+#[test]
+fn aliased_struct_serde() {
+    // The auto-injected `#[serde(alias = "...")]` on the canonical field lets serde accept
+    // both the canonical name and every declared alias.
+    let parse = |body| {
+        serde_json::from_value::<AliasedStruct>(body)
+            .unwrap()
+            .verify_mode
+    };
+    assert_eq!(parse(serde_json::json!({"verify-mode": "fast"})), "fast");
+    assert_eq!(parse(serde_json::json!({"verify": "slow"})), "slow");
+    assert_eq!(parse(serde_json::json!({"legacy": "full"})), "full");
+}
