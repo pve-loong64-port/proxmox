@@ -508,6 +508,7 @@ impl SectionConfig {
                         ParseState::InsideSection(plugin, ref mut section_id, ref mut config) => {
                             if line.trim().is_empty() {
                                 // finish section
+                                plugin.properties.canonicalize_aliases(config)?;
                                 test_required_properties(
                                     config,
                                     plugin.properties,
@@ -593,6 +594,7 @@ impl SectionConfig {
                     ParseState::BeforeHeader => {}
                     ParseState::InsideSection(plugin, ref mut section_id, ref mut config) => {
                         // finish section
+                        plugin.properties.canonicalize_aliases(config)?;
                         test_required_properties(config, plugin.properties, &plugin.id_property)?;
                         if let Some(id_property) = &plugin.id_property {
                             config[id_property] = Value::from(section_id.clone());
@@ -1143,6 +1145,48 @@ token: asdf@pbs!asdftoken
     let config = config.allow_unknown_sections(false);
 
     assert!(config.parse(filename, raw).is_err());
+}
+
+#[test]
+fn test_section_config_property_aliases() {
+    let filename = "mirror.cfg";
+
+    const ID_SCHEMA: Schema = StringSchema::new("Mirror ID.").min_length(3).schema();
+    const PROPERTIES: ObjectSchema = ObjectSchema::new(
+        "mirror properties",
+        &[("verify-mode", false, &StringSchema::new("Mode.").schema())],
+    )
+    .property_aliases(&[("verify", "verify-mode")]);
+
+    let plugin = SectionConfigPlugin::new("mirror".to_string(), None, &PROPERTIES);
+    let mut config = SectionConfig::new(&ID_SCHEMA);
+    config.register_plugin(plugin);
+
+    // Deprecated alias is canonicalized in the parsed Value, so downstream serde-driven
+    // `convert_to_typed_array` calls see only the canonical key.
+    let raw = "mirror: legacy\n\tverify full\n";
+    let res = config.parse(filename, raw).unwrap();
+    let (_, section) = res.sections.get("legacy").unwrap();
+    assert_eq!(*section.get("verify-mode").unwrap(), json!("full"));
+    assert!(
+        section.get("verify").is_none(),
+        "alias key must be rewritten"
+    );
+
+    // Required-property check after canonicalization recognizes the alias as satisfying
+    // the canonical property's `optional: false`.
+    let raw = "mirror: alias-only\n\tverify size\n";
+    config
+        .parse(filename, raw)
+        .expect("alias satisfies required");
+
+    // Mixing alias and canonical in one section is rejected.
+    let raw = "mirror: conflict\n\tverify full\n\tverify-mode none\n";
+    let err = config.parse(filename, raw).expect_err("mix rejected");
+    assert!(
+        format!("{err}").contains("cannot set both"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
