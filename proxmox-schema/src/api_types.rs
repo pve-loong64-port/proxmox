@@ -95,8 +95,11 @@ const_regex! {
     pub PASSWORD_REGEX = r"^[[:^cntrl:]]*$";
     /// Single line comment. Allow everything but control characters.
     pub SINGLE_LINE_COMMENT_REGEX = r"^[[:^cntrl:]]*$";
-    /// Comment spawning multiple lines. Allow everything but control characters.
-    pub MULTI_LINE_COMMENT_REGEX = r"(?m)^([[:^cntrl:]]*)$";
+    /// Comment spanning multiple lines. Allow newlines, tabs and everything but other control
+    /// characters, as tabs are ordinary whitespace in free-form text like markdown notes.
+    /// Anchored to the entire input so a single dirty line cannot hide behind a clean one
+    /// (`is_match` of a multi-line `^...$` pattern would succeed as long as any line matched).
+    pub MULTI_LINE_COMMENT_REGEX = r"\A(?:[[:^cntrl:]]|[\t\n])*\z";
 
     pub HOSTNAME_REGEX = r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?)$";
     pub DNS_NAME_REGEX = concatcp!(r"^", DNS_NAME_STR, r"$");
@@ -301,4 +304,18 @@ fn test_regexes() {
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("6zroXbjGs9sdOpr1n/M5hh+UklBxtQ90tGQDnYzJfw=="));
     // 33 bytes of data
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("IiC3Nkh4Fn2ukUZUNmdK5K5CWO53Zmk/eGlKO4m6aCD/"));
+}
+
+#[test]
+fn test_multi_line_comment_regex() {
+    assert!(MULTI_LINE_COMMENT_REGEX.is_match(""));
+    assert!(MULTI_LINE_COMMENT_REGEX.is_match("first line\nsecond line\n"));
+    assert!(MULTI_LINE_COMMENT_REGEX.is_match("list:\n\t- indented with a tab\n"));
+    assert!(MULTI_LINE_COMMENT_REGEX.is_match("non-ASCII: äöü €\n"));
+
+    // a clean line, including the empty one after a trailing newline, must not make up for
+    // a control character elsewhere in the value
+    assert!(!MULTI_LINE_COMMENT_REGEX.is_match("clean\nbel\x07line"));
+    assert!(!MULTI_LINE_COMMENT_REGEX.is_match("esc\x1b[1m\n"));
+    assert!(!MULTI_LINE_COMMENT_REGEX.is_match("crlf\r\n"));
 }
