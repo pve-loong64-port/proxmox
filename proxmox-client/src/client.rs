@@ -556,6 +556,12 @@ fn verify_fingerprint(chain: &x509::X509StoreContextRef, expected_fingerprint: &
     if expected_fingerprint != fp.as_ref() {
         log::error!("bad fingerprint: {}", fp_string(&fp));
         log::error!("expected fingerprint: {}", fp_string(expected_fingerprint));
+        log::error!(
+            r#"If this fingerprint has worked before, it is possible that it changed on the remote
+side. This can happen, for example, if the remote rotates it's certificate regularly.
+If you are sure no machine-in-the-middle attack (MitM) occured, it is safe to set the
+above 'bad fingerpint' as the new fingerprint for the remote."#
+        );
         return false;
     }
 
@@ -588,9 +594,9 @@ fn classify_client_error(err: anyhow::Error) -> Error {
         if let Some(ssl_err) = cause.downcast_ref::<openssl::error::ErrorStack>() {
             return Error::Connect(
                 format!(
-                    "Could not establish a TLS connection. Check \
-                    whether the fingerprint matches or the certificate is valid. \
-                    OpenSSL Error: {ssl_err}"
+                    "Could not establish a TLS connection. Check whether the fingerprint matches or \
+                    the certificate on the remote is valid. The system log might also contain more \
+                    information. OpenSSL Error: {ssl_err}"
                 )
                 .into(),
             );
