@@ -192,10 +192,6 @@
 /// - /nodes/{node}/lxc/{vmid}/mtunnelwebsocket
 /// - /nodes/{node}/lxc/{vmid}/rrd
 /// - /nodes/{node}/lxc/{vmid}/rrddata
-/// - /nodes/{node}/lxc/{vmid}/snapshot
-/// - /nodes/{node}/lxc/{vmid}/snapshot/{snapname}
-/// - /nodes/{node}/lxc/{vmid}/snapshot/{snapname}/config
-/// - /nodes/{node}/lxc/{vmid}/snapshot/{snapname}/rollback
 /// - /nodes/{node}/lxc/{vmid}/spiceproxy
 /// - /nodes/{node}/lxc/{vmid}/status
 /// - /nodes/{node}/lxc/{vmid}/status/reboot
@@ -248,10 +244,6 @@
 /// - /nodes/{node}/qemu/{vmid}/rrd
 /// - /nodes/{node}/qemu/{vmid}/rrddata
 /// - /nodes/{node}/qemu/{vmid}/sendkey
-/// - /nodes/{node}/qemu/{vmid}/snapshot
-/// - /nodes/{node}/qemu/{vmid}/snapshot/{snapname}
-/// - /nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config
-/// - /nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback
 /// - /nodes/{node}/qemu/{vmid}/spiceproxy
 /// - /nodes/{node}/qemu/{vmid}/status
 /// - /nodes/{node}/qemu/{vmid}/status/reboot
@@ -669,6 +661,17 @@ pub trait PveClient {
         ))
     }
 
+    /// Delete a LXC snapshot.
+    async fn delete_lxc_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: DeleteLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("delete_lxc_snapshot not implemented"))
+    }
+
     /// Remove IP or Network alias.
     async fn delete_qemu_firewall_alias(
         &self,
@@ -703,6 +706,17 @@ pub trait PveClient {
         Err(Error::Other(
             "delete_qemu_firewall_ipset_entry not implemented",
         ))
+    }
+
+    /// Delete a VM snapshot.
+    async fn delete_qemu_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: DeleteQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("delete_qemu_snapshot not implemented"))
     }
 
     /// Delete subscription key of this node.
@@ -1152,6 +1166,11 @@ pub trait PveClient {
         Err(Error::Other("lxc_get_status not implemented"))
     }
 
+    /// List all snapshots.
+    async fn lxc_list_snapshots(&self, node: &str, vmid: u32) -> Result<Vec<LxcSnapshot>, Error> {
+        Err(Error::Other("lxc_list_snapshots not implemented"))
+    }
+
     /// Move a rootfs-/mp-volume to a different storage or to a different
     /// container.
     async fn lxc_move_volume(
@@ -1354,6 +1373,11 @@ pub trait PveClient {
         Err(Error::Other("qemu_get_status not implemented"))
     }
 
+    /// List all snapshots.
+    async fn qemu_list_snapshots(&self, node: &str, vmid: u32) -> Result<Vec<QemuSnapshot>, Error> {
+        Err(Error::Other("qemu_list_snapshots not implemented"))
+    }
+
     /// Get preconditions for migration.
     async fn qemu_migrate_preconditions(
         &self,
@@ -1450,6 +1474,28 @@ pub trait PveClient {
         params: ResumeQemu,
     ) -> Result<PveUpid, Error> {
         Err(Error::Other("resume_qemu_async not implemented"))
+    }
+
+    /// Rollback LXC state to specified snapshot.
+    async fn rollback_lxc_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: RollbackLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("rollback_lxc_snapshot not implemented"))
+    }
+
+    /// Rollback VM state to specified snapshot.
+    async fn rollback_qemu_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: RollbackQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("rollback_qemu_snapshot not implemented"))
     }
 
     /// Rollback pending changes to SDN configuration
@@ -1553,6 +1599,26 @@ pub trait PveClient {
         params: ShutdownQemu,
     ) -> Result<PveUpid, Error> {
         Err(Error::Other("shutdown_qemu_async not implemented"))
+    }
+
+    /// Snapshot a container.
+    async fn snapshot_lxc(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: CreateLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("snapshot_lxc not implemented"))
+    }
+
+    /// Snapshot a VM.
+    async fn snapshot_qemu(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: CreateQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        Err(Error::Other("snapshot_qemu not implemented"))
     }
 
     /// Start ceph services.
@@ -1694,6 +1760,17 @@ pub trait PveClient {
         ))
     }
 
+    /// Update snapshot metadata.
+    async fn update_lxc_snapshot_config(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: UpdateLxcSnapshotConfig,
+    ) -> Result<(), Error> {
+        Err(Error::Other("update_lxc_snapshot_config not implemented"))
+    }
+
     /// Update IP or Network alias.
     async fn update_qemu_firewall_alias(
         &self,
@@ -1717,6 +1794,17 @@ pub trait PveClient {
         Err(Error::Other(
             "update_qemu_firewall_ipset_entry not implemented",
         ))
+    }
+
+    /// Update snapshot metadata.
+    async fn update_qemu_snapshot_config(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: UpdateQemuSnapshotConfig,
+    ) -> Result<(), Error> {
+        Err(Error::Other("update_qemu_snapshot_config not implemented"))
     }
 
     /// Update subscription info.
@@ -2239,6 +2327,27 @@ where
         self.0.delete(url).await?.nodata()
     }
 
+    /// Delete a LXC snapshot.
+    async fn delete_lxc_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: DeleteLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let DeleteLxcSnapshot { force: p_force } = params;
+
+        let url = &ApiPathBuilder::new(format!(
+            "/api2/extjs/nodes/{}/lxc/{}/snapshot/{}",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        ))
+        .maybe_bool_arg("force", p_force)
+        .build();
+        Ok(self.0.delete(url).await?.expect_json()?.data)
+    }
+
     /// Remove IP or Network alias.
     async fn delete_qemu_firewall_alias(
         &self,
@@ -2302,6 +2411,27 @@ where
         .maybe_arg("digest", &p_digest)
         .build();
         self.0.delete(url).await?.nodata()
+    }
+
+    /// Delete a VM snapshot.
+    async fn delete_qemu_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: DeleteQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let DeleteQemuSnapshot { force: p_force } = params;
+
+        let url = &ApiPathBuilder::new(format!(
+            "/api2/extjs/nodes/{}/qemu/{}/snapshot/{}",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        ))
+        .maybe_bool_arg("force", p_force)
+        .build();
+        Ok(self.0.delete(url).await?.expect_json()?.data)
     }
 
     /// Delete subscription key of this node.
@@ -3098,6 +3228,16 @@ where
         Ok(self.0.get(url).await?.expect_json()?.data)
     }
 
+    /// List all snapshots.
+    async fn lxc_list_snapshots(&self, node: &str, vmid: u32) -> Result<Vec<LxcSnapshot>, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/snapshot",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.get(url).await?.expect_json()?.data)
+    }
+
     /// Move a rootfs-/mp-volume to a different storage or to a different
     /// container.
     async fn lxc_move_volume(
@@ -3425,6 +3565,16 @@ where
         Ok(self.0.get(url).await?.expect_json()?.data)
     }
 
+    /// List all snapshots.
+    async fn qemu_list_snapshots(&self, node: &str, vmid: u32) -> Result<Vec<QemuSnapshot>, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/snapshot",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.get(url).await?.expect_json()?.data)
+    }
+
     /// Get preconditions for migration.
     async fn qemu_migrate_preconditions(
         &self,
@@ -3578,6 +3728,40 @@ where
         Ok(self.0.post(url, &params).await?.expect_json()?.data)
     }
 
+    /// Rollback LXC state to specified snapshot.
+    async fn rollback_lxc_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: RollbackLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/snapshot/{}/rollback",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
+    /// Rollback VM state to specified snapshot.
+    async fn rollback_qemu_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: RollbackQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/snapshot/{}/rollback",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
     /// Rollback pending changes to SDN configuration
     async fn rollback_sdn_changes(&self, params: RollbackSdn) -> Result<(), Error> {
         let url = "/api2/extjs/cluster/sdn/rollback";
@@ -3717,6 +3901,36 @@ where
     ) -> Result<PveUpid, Error> {
         let url = &format!(
             "/api2/extjs/nodes/{}/qemu/{}/status/shutdown",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
+    /// Snapshot a container.
+    async fn snapshot_lxc(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: CreateLxcSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/snapshot",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
+    /// Snapshot a VM.
+    async fn snapshot_qemu(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: CreateQemuSnapshot,
+    ) -> Result<PveUpid, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/snapshot",
             percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
             vmid
         );
@@ -3927,6 +4141,23 @@ where
         self.0.put(url, &params).await?.nodata()
     }
 
+    /// Update snapshot metadata.
+    async fn update_lxc_snapshot_config(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: UpdateLxcSnapshotConfig,
+    ) -> Result<(), Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/snapshot/{}/config",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        );
+        self.0.put(url, &params).await?.nodata()
+    }
+
     /// Update IP or Network alias.
     async fn update_qemu_firewall_alias(
         &self,
@@ -3959,6 +4190,23 @@ where
             vmid,
             percent_encode(name.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
             percent_encode(cidr.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        );
+        self.0.put(url, &params).await?.nodata()
+    }
+
+    /// Update snapshot metadata.
+    async fn update_qemu_snapshot_config(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapname: &str,
+        params: UpdateQemuSnapshotConfig,
+    ) -> Result<(), Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/snapshot/{}/config",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid,
+            percent_encode(snapname.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
         );
         self.0.put(url, &params).await?.nodata()
     }

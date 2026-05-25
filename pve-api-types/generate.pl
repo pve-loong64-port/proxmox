@@ -274,6 +274,17 @@ api(POST => '/nodes/{node}/qemu/{vmid}/migrate',        'migrate_qemu',         
 Schema2Rust::register_api_override('MigrateQemu', '/properties/bwlimit/default', undef);
 api(POST => '/nodes/{node}/qemu/{vmid}/remote_migrate', 'remote_migrate_qemu',  'output-type' => 'PveUpid', 'param-name' => 'RemoteMigrateQemu');
 
+api(GET    => '/nodes/{node}/qemu/{vmid}/snapshot', 'qemu_list_snapshots', 'return-name' => 'QemuSnapshot');
+api(POST   => '/nodes/{node}/qemu/{vmid}/snapshot', 'snapshot_qemu',       'output-type' => 'PveUpid', 'param-name' => 'CreateQemuSnapshot');
+api(DELETE => '/nodes/{node}/qemu/{vmid}/snapshot/{snapname}', 'delete_qemu_snapshot',   'output-type' => 'PveUpid', 'param-name' => 'DeleteQemuSnapshot');
+api(POST   => '/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback', 'rollback_qemu_snapshot', 'output-type' => 'PveUpid', 'param-name' => 'RollbackQemuSnapshot');
+api(PUT    => '/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config', 'update_qemu_snapshot_config', 'param-name' => 'UpdateQemuSnapshotConfig');
+Schema2Rust::derive('QemuSnapshot' => 'Clone', 'PartialEq');
+Schema2Rust::derive('CreateQemuSnapshot' => 'Default');
+Schema2Rust::derive('DeleteQemuSnapshot' => 'Default');
+Schema2Rust::derive('RollbackQemuSnapshot' => 'Default');
+Schema2Rust::derive('UpdateQemuSnapshotConfig' => 'Default');
+
 api(GET => '/nodes/{node}/lxc',                         'list_lxc',            'param-name' => 'FixmeListLxc',      'return-name' => 'LxcEntry');
 api(GET => '/nodes/{node}/lxc/{vmid}/config',           'lxc_get_config',      'param-name' => 'FixmeLxcGetConfig', 'return-name' => 'LxcConfig');
 Schema2Rust::derive('LxcConfigNet' => 'Clone', 'PartialEq');
@@ -291,6 +302,17 @@ Schema2Rust::derive('ShutdownLxc' => 'Default');
 api(POST => '/nodes/{node}/lxc/{vmid}/migrate',        'migrate_lxc',         'output-type' => 'PveUpid', 'param-name' => 'MigrateLxc');
 Schema2Rust::register_api_override('MigrateLxc', '/properties/bwlimit/default', undef);
 api(POST => '/nodes/{node}/lxc/{vmid}/remote_migrate', 'remote_migrate_lxc',  'output-type' => 'PveUpid', 'param-name' => 'RemoteMigrateLxc');
+
+api(GET    => '/nodes/{node}/lxc/{vmid}/snapshot', 'lxc_list_snapshots', 'return-name' => 'LxcSnapshot');
+api(POST   => '/nodes/{node}/lxc/{vmid}/snapshot', 'snapshot_lxc',       'output-type' => 'PveUpid', 'param-name' => 'CreateLxcSnapshot');
+api(DELETE => '/nodes/{node}/lxc/{vmid}/snapshot/{snapname}', 'delete_lxc_snapshot',   'output-type' => 'PveUpid', 'param-name' => 'DeleteLxcSnapshot');
+api(POST   => '/nodes/{node}/lxc/{vmid}/snapshot/{snapname}/rollback', 'rollback_lxc_snapshot', 'output-type' => 'PveUpid', 'param-name' => 'RollbackLxcSnapshot');
+api(PUT    => '/nodes/{node}/lxc/{vmid}/snapshot/{snapname}/config', 'update_lxc_snapshot_config', 'param-name' => 'UpdateLxcSnapshotConfig');
+Schema2Rust::derive('LxcSnapshot' => 'Clone', 'PartialEq');
+Schema2Rust::derive('CreateLxcSnapshot' => 'Default');
+Schema2Rust::derive('DeleteLxcSnapshot' => 'Default');
+Schema2Rust::derive('RollbackLxcSnapshot' => 'Default');
+Schema2Rust::derive('UpdateLxcSnapshotConfig' => 'Default');
 
 Schema2Rust::register_enum_variant('ListNetworksType::OVSBridge' => 'OvsBridge');
 Schema2Rust::register_enum_variant('ListNetworksType::OVSBond' => 'OvsBond');

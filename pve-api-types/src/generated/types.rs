@@ -4012,6 +4012,85 @@ pub struct CreateFirewallIpSetEntry {
     pub nomatch: Option<bool>,
 }
 
+const_regex! {
+
+CREATE_LXC_SNAPSHOT_SNAPNAME_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
+
+}
+
+#[test]
+fn test_regex_compilation_7() {
+    use regex::Regex;
+    let _: &Regex = &CREATE_LXC_SNAPSHOT_SNAPNAME_RE;
+}
+#[api(
+    properties: {
+        description: {
+            optional: true,
+            type: String,
+        },
+        snapname: {
+            format: &ApiStringFormat::Pattern(&CREATE_LXC_SNAPSHOT_SNAPNAME_RE),
+            max_length: 40,
+            type: String,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct CreateLxcSnapshot {
+    /// A textual description or comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// The name of the snapshot.
+    pub snapname: String,
+}
+
+const_regex! {
+
+CREATE_QEMU_SNAPSHOT_SNAPNAME_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
+
+}
+
+#[test]
+fn test_regex_compilation_8() {
+    use regex::Regex;
+    let _: &Regex = &CREATE_QEMU_SNAPSHOT_SNAPNAME_RE;
+}
+#[api(
+    properties: {
+        description: {
+            optional: true,
+            type: String,
+        },
+        snapname: {
+            format: &ApiStringFormat::Pattern(&CREATE_QEMU_SNAPSHOT_SNAPNAME_RE),
+            max_length: 40,
+            type: String,
+        },
+        vmstate: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct CreateQemuSnapshot {
+    /// A textual description or comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// The name of the snapshot.
+    pub snapname: String,
+
+    /// Save the vmstate
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vmstate: Option<bool>,
+}
+
 #[api(
     properties: {
         "allow-pending": {
@@ -4220,7 +4299,7 @@ CREATE_ZONE_NODES_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"##;
 }
 
 #[test]
-fn test_regex_compilation_7() {
+fn test_regex_compilation_9() {
     use regex::Regex;
     let _: &Regex = &CREATE_ZONE_EXITNODES_RE;
     let _: &Regex = &CREATE_ZONE_EXITNODES_PRIMARY_RE;
@@ -4565,6 +4644,40 @@ pub struct DeleteFirewallIpSetEntry {
     /// This can be used to prevent concurrent modifications.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+}
+
+#[api(
+    properties: {
+        force: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct DeleteLxcSnapshot {
+    /// For removal from config file, even if removing disk snapshots fails.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+}
+
+#[api(
+    properties: {
+        force: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct DeleteQemuSnapshot {
+    /// For removal from config file, even if removing disk snapshots fails.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
 }
 
 #[api(
@@ -5561,7 +5674,7 @@ LIST_TASKS_STATUSFILTER_RE = r##"^(?i:ok|error|warning|unknown)$"##;
 }
 
 #[test]
-fn test_regex_compilation_8() {
+fn test_regex_compilation_10() {
     use regex::Regex;
     let _: &Regex = &LIST_TASKS_STATUSFILTER_RE;
 }
@@ -5804,7 +5917,7 @@ LXC_CONFIG_TIMEZONE_RE = r##"^.*/.*$"##;
 }
 
 #[test]
-fn test_regex_compilation_9() {
+fn test_regex_compilation_11() {
     use regex::Regex;
     let _: &Regex = &LXC_CONFIG_TAGS_RE;
     let _: &Regex = &LXC_CONFIG_TIMEZONE_RE;
@@ -6426,7 +6539,7 @@ LXC_CONFIG_MP_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_10() {
+fn test_regex_compilation_12() {
     use regex::Regex;
     let _: &Regex = &LXC_CONFIG_MP_SIZE_RE;
 }
@@ -6552,7 +6665,7 @@ LXC_CONFIG_NET_HWADDR_RE = r##"^(?i)[a-f0-9][02468ace](?::[a-f0-9]{2}){5}$"##;
 }
 
 #[test]
-fn test_regex_compilation_11() {
+fn test_regex_compilation_13() {
     use regex::Regex;
     let _: &Regex = &LXC_CONFIG_NET_HWADDR_RE;
 }
@@ -6770,7 +6883,7 @@ LXC_CONFIG_ROOTFS_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_12() {
+fn test_regex_compilation_14() {
     use regex::Regex;
     let _: &Regex = &LXC_CONFIG_ROOTFS_SIZE_RE;
 }
@@ -7073,7 +7186,7 @@ LXC_MOVE_VOLUME_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9])$"##;
 }
 
 #[test]
-fn test_regex_compilation_13() {
+fn test_regex_compilation_15() {
     use regex::Regex;
     let _: &Regex = &LXC_MOVE_VOLUME_STORAGE_RE;
 }
@@ -9526,6 +9639,43 @@ serde_plain::derive_fromstr_from_deserialize!(LxcResizeDisk);
 
 #[api(
     properties: {
+        description: {
+            type: String,
+        },
+        name: {
+            type: String,
+        },
+        parent: {
+            optional: true,
+            type: String,
+        },
+        snaptime: {
+            optional: true,
+            type: Integer,
+        },
+    },
+)]
+/// Object.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LxcSnapshot {
+    /// Snapshot description.
+    pub description: String,
+
+    /// Snapshot identifier. Value 'current' identifies the current VM.
+    pub name: String,
+
+    /// Parent snapshot identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+
+    /// Snapshot creation time
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snaptime: Option<i64>,
+}
+
+#[api(
+    properties: {
         disk: {
             minimum: 0,
             optional: true,
@@ -9727,7 +9877,7 @@ MIGRATE_LXC_TARGET_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]):(?i:[a-z][a
 }
 
 #[test]
-fn test_regex_compilation_14() {
+fn test_regex_compilation_16() {
     use regex::Regex;
     let _: &Regex = &MIGRATE_LXC_TARGET_RE;
     let _: &Regex = &MIGRATE_LXC_TARGET_STORAGE_RE;
@@ -9808,7 +9958,7 @@ MIGRATE_QEMU_TARGETSTORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]):(?i:[a-z][a
 }
 
 #[test]
-fn test_regex_compilation_15() {
+fn test_regex_compilation_17() {
     use regex::Regex;
     let _: &Regex = &MIGRATE_QEMU_TARGET_RE;
     let _: &Regex = &MIGRATE_QEMU_TARGETSTORAGE_RE;
@@ -10024,7 +10174,7 @@ NETWORK_INTERFACE_VLAN_RAW_DEVICE_RE = r##"^[a-zA-Z][a-zA-Z0-9_]{1,20}([:\.]\d+)
 }
 
 #[test]
-fn test_regex_compilation_16() {
+fn test_regex_compilation_18() {
     use regex::Regex;
     let _: &Regex = &NETWORK_INTERFACE_BOND_PRIMARY_RE;
     let _: &Regex = &NETWORK_INTERFACE_BRIDGE_PORTS_RE;
@@ -10764,7 +10914,7 @@ NODE_CONFIG_ACME_ACCOUNT_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_17() {
+fn test_regex_compilation_19() {
     use regex::Regex;
     let _: &Regex = &NODE_CONFIG_ACME_ACCOUNT_RE;
 }
@@ -10802,7 +10952,7 @@ NODE_CONFIG_ACMEDOMAIN_PLUGIN_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_18() {
+fn test_regex_compilation_20() {
     use regex::Regex;
     let _: &Regex = &NODE_CONFIG_ACMEDOMAIN_PLUGIN_RE;
 }
@@ -10896,7 +11046,7 @@ NODE_CONFIG_WAKEONLAN_MAC_RE = r##"^(?i)[a-f0-9][02468ace](?::[a-f0-9]{2}){5}$"#
 }
 
 #[test]
-fn test_regex_compilation_19() {
+fn test_regex_compilation_21() {
     use regex::Regex;
     let _: &Regex = &NODE_CONFIG_WAKEONLAN_BIND_INTERFACE_RE;
     let _: &Regex = &NODE_CONFIG_WAKEONLAN_MAC_RE;
@@ -11876,7 +12026,7 @@ PVE_QM_HOSTPCI_MAPPING_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_20() {
+fn test_regex_compilation_22() {
     use regex::Regex;
     let _: &Regex = &PVE_QM_HOSTPCI_MAPPING_RE;
 }
@@ -12045,7 +12195,7 @@ PVE_QM_IDE_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_21() {
+fn test_regex_compilation_23() {
     use regex::Regex;
     let _: &Regex = &PVE_QM_IDE_MODEL_RE;
     let _: &Regex = &PVE_QM_IDE_SERIAL_RE;
@@ -13231,7 +13381,7 @@ QEMU_CONFIG_VMSTATESTORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9])$"##;
 }
 
 #[test]
-fn test_regex_compilation_22() {
+fn test_regex_compilation_24() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_AFFINITY_RE;
     let _: &Regex = &QEMU_CONFIG_BOOTDISK_RE;
@@ -14406,7 +14556,7 @@ QEMU_CONFIG_EFIDISK0_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_23() {
+fn test_regex_compilation_25() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_EFIDISK0_SIZE_RE;
 }
@@ -14823,7 +14973,7 @@ QEMU_CONFIG_NET_MACADDR_RE = r##"^(?i)[a-f0-9][02468ace](?::[a-f0-9]{2}){5}$"##;
 }
 
 #[test]
-fn test_regex_compilation_24() {
+fn test_regex_compilation_26() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_NET_BRIDGE_RE;
     let _: &Regex = &QEMU_CONFIG_NET_MACADDR_RE;
@@ -15129,7 +15279,7 @@ QEMU_CONFIG_SATA_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_25() {
+fn test_regex_compilation_27() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_SATA_SERIAL_RE;
     let _: &Regex = &QEMU_CONFIG_SATA_SIZE_RE;
@@ -15462,7 +15612,7 @@ QEMU_CONFIG_SCSI_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_26() {
+fn test_regex_compilation_28() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_SCSI_SERIAL_RE;
     let _: &Regex = &QEMU_CONFIG_SCSI_SIZE_RE;
@@ -15926,7 +16076,7 @@ QEMU_CONFIG_TPMSTATE0_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_27() {
+fn test_regex_compilation_29() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_TPMSTATE0_SIZE_RE;
 }
@@ -16031,7 +16181,7 @@ QEMU_CONFIG_USB_MAPPING_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_28() {
+fn test_regex_compilation_30() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_USB_MAPPING_RE;
 }
@@ -16202,7 +16352,7 @@ QEMU_CONFIG_VIRTIO_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_29() {
+fn test_regex_compilation_31() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_VIRTIO_SERIAL_RE;
     let _: &Regex = &QEMU_CONFIG_VIRTIO_SIZE_RE;
@@ -16533,7 +16683,7 @@ QEMU_CONFIG_VIRTIOFS_DIRID_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_30() {
+fn test_regex_compilation_32() {
     use regex::Regex;
     let _: &Regex = &QEMU_CONFIG_VIRTIOFS_DIRID_RE;
 }
@@ -16833,7 +16983,7 @@ QEMU_MOVE_DISK_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9])$"##;
 }
 
 #[test]
-fn test_regex_compilation_31() {
+fn test_regex_compilation_33() {
     use regex::Regex;
     let _: &Regex = &QEMU_MOVE_DISK_STORAGE_RE;
 }
@@ -18114,6 +18264,52 @@ serde_plain::derive_fromstr_from_deserialize!(QemuResizeDisk);
 
 #[api(
     properties: {
+        description: {
+            type: String,
+        },
+        name: {
+            type: String,
+        },
+        parent: {
+            optional: true,
+            type: String,
+        },
+        snaptime: {
+            optional: true,
+            type: Integer,
+        },
+        vmstate: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct QemuSnapshot {
+    /// Snapshot description.
+    pub description: String,
+
+    /// Snapshot identifier. Value 'current' identifies the current VM.
+    pub name: String,
+
+    /// Parent snapshot identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+
+    /// Snapshot creation time
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snaptime: Option<i64>,
+
+    /// Snapshot includes RAM.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vmstate: Option<bool>,
+}
+
+#[api(
+    properties: {
         agent: {
             default: false,
             optional: true,
@@ -18436,7 +18632,7 @@ REMOTE_MIGRATE_LXC_TARGET_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]):(?i:
 }
 
 #[test]
-fn test_regex_compilation_32() {
+fn test_regex_compilation_34() {
     use regex::Regex;
     let _: &Regex = &REMOTE_MIGRATE_LXC_TARGET_BRIDGE_RE;
     let _: &Regex = &REMOTE_MIGRATE_LXC_TARGET_STORAGE_RE;
@@ -18553,7 +18749,7 @@ REMOTE_MIGRATE_QEMU_TARGET_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]):(?i
 }
 
 #[test]
-fn test_regex_compilation_33() {
+fn test_regex_compilation_35() {
     use regex::Regex;
     let _: &Regex = &REMOTE_MIGRATE_QEMU_TARGET_BRIDGE_RE;
     let _: &Regex = &REMOTE_MIGRATE_QEMU_TARGET_STORAGE_RE;
@@ -18686,6 +18882,41 @@ pub struct ResumeQemu {
     #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skiplock: Option<bool>,
+}
+
+#[api(
+    properties: {
+        start: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct RollbackLxcSnapshot {
+    /// Whether the container should get started after rolling back successfully
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<bool>,
+}
+
+#[api(
+    properties: {
+        start: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct RollbackQemuSnapshot {
+    /// Whether the VM should get started after rolling back successfully.
+    /// (Note: VMs will be automatically started if the snapshot includes RAM.)
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<bool>,
 }
 
 #[api(
@@ -18915,7 +19146,7 @@ SDN_CONTROLLER_NODES_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"##;
 }
 
 #[test]
-fn test_regex_compilation_34() {
+fn test_regex_compilation_36() {
     use regex::Regex;
     let _: &Regex = &SDN_CONTROLLER_ISIS_IFACES_RE;
     let _: &Regex = &SDN_CONTROLLER_ISIS_NET_RE;
@@ -19118,7 +19349,7 @@ SDN_CONTROLLER_PENDING_NODES_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"#
 }
 
 #[test]
-fn test_regex_compilation_35() {
+fn test_regex_compilation_37() {
     use regex::Regex;
     let _: &Regex = &SDN_CONTROLLER_PENDING_ISIS_IFACES_RE;
     let _: &Regex = &SDN_CONTROLLER_PENDING_ISIS_NET_RE;
@@ -19374,7 +19605,7 @@ SDN_VNET_MAC_VRF_MAC_RE = r##"^(?i)[a-f0-9][02468ace](?::[a-f0-9]{2}){5}$"##;
 }
 
 #[test]
-fn test_regex_compilation_36() {
+fn test_regex_compilation_38() {
     use regex::Regex;
     let _: &Regex = &SDN_VNET_MAC_VRF_MAC_RE;
 }
@@ -19486,7 +19717,7 @@ SDN_ZONE_EXITNODES_PRIMARY_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"##;
 }
 
 #[test]
-fn test_regex_compilation_37() {
+fn test_regex_compilation_39() {
     use regex::Regex;
     let _: &Regex = &SDN_ZONE_EXITNODES_RE;
     let _: &Regex = &SDN_ZONE_EXITNODES_PRIMARY_RE;
@@ -19816,7 +20047,7 @@ SDN_ZONE_PENDING_EXITNODES_PRIMARY_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9]
 }
 
 #[test]
-fn test_regex_compilation_38() {
+fn test_regex_compilation_40() {
     use regex::Regex;
     let _: &Regex = &SDN_ZONE_PENDING_EXITNODES_RE;
     let _: &Regex = &SDN_ZONE_PENDING_EXITNODES_PRIMARY_RE;
@@ -20389,7 +20620,7 @@ START_QEMU_TARGETSTORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]):(?i:[a-z][a-z
 }
 
 #[test]
-fn test_regex_compilation_39() {
+fn test_regex_compilation_41() {
     use regex::Regex;
     let _: &Regex = &START_QEMU_MIGRATEDFROM_RE;
     let _: &Regex = &START_QEMU_TARGETSTORAGE_RE;
@@ -20580,7 +20811,7 @@ STOP_QEMU_MIGRATEDFROM_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"##;
 }
 
 #[test]
-fn test_regex_compilation_40() {
+fn test_regex_compilation_42() {
     use regex::Regex;
     let _: &Regex = &STOP_QEMU_MIGRATEDFROM_RE;
 }
@@ -20682,7 +20913,7 @@ STORAGE_INFO_STORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9])$"##;
 }
 
 #[test]
-fn test_regex_compilation_41() {
+fn test_regex_compilation_43() {
     use regex::Regex;
     let _: &Regex = &STORAGE_INFO_STORAGE_RE;
 }
@@ -21135,7 +21366,7 @@ UPDATE_CLUSTER_FIREWALL_OPTIONS_DELETE_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_42() {
+fn test_regex_compilation_44() {
     use regex::Regex;
     let _: &Regex = &UPDATE_CLUSTER_FIREWALL_OPTIONS_DELETE_RE;
 }
@@ -21229,7 +21460,7 @@ UPDATE_CLUSTER_OPTIONS_MAC_PREFIX_RE = r##"^(?i)[a-f0-9][02468ace](?::[a-f0-9]{2
 }
 
 #[test]
-fn test_regex_compilation_43() {
+fn test_regex_compilation_45() {
     use regex::Regex;
     let _: &Regex = &UPDATE_CLUSTER_OPTIONS_DELETE_RE;
     let _: &Regex = &UPDATE_CLUSTER_OPTIONS_EMAIL_FROM_RE;
@@ -21566,7 +21797,7 @@ UPDATE_GUEST_FIREWALL_OPTIONS_DELETE_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_44() {
+fn test_regex_compilation_46() {
     use regex::Regex;
     let _: &Regex = &UPDATE_GUEST_FIREWALL_OPTIONS_DELETE_RE;
 }
@@ -21697,7 +21928,7 @@ UPDATE_LXC_CONFIG_TIMEZONE_RE = r##"^.*/.*$"##;
 }
 
 #[test]
-fn test_regex_compilation_45() {
+fn test_regex_compilation_47() {
     use regex::Regex;
     let _: &Regex = &UPDATE_LXC_CONFIG_DELETE_RE;
     let _: &Regex = &UPDATE_LXC_CONFIG_REVERT_RE;
@@ -22069,6 +22300,22 @@ pub struct UpdateLxcConfig {
     pub unused: LxcConfigUnusedArray,
 }
 
+#[api(
+    properties: {
+        description: {
+            optional: true,
+            type: String,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct UpdateLxcSnapshotConfig {
+    /// A textual description or comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 const_regex! {
 
 UPDATE_NODE_CONFIG_DELETE_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
@@ -22076,7 +22323,7 @@ UPDATE_NODE_CONFIG_DELETE_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_46() {
+fn test_regex_compilation_48() {
     use regex::Regex;
     let _: &Regex = &UPDATE_NODE_CONFIG_DELETE_RE;
 }
@@ -22190,7 +22437,7 @@ UPDATE_NODE_FIREWALL_OPTIONS_DELETE_RE = r##"^(?i:[a-z][a-z0-9_-]+)$"##;
 }
 
 #[test]
-fn test_regex_compilation_47() {
+fn test_regex_compilation_49() {
     use regex::Regex;
     let _: &Regex = &UPDATE_NODE_FIREWALL_OPTIONS_DELETE_RE;
 }
@@ -22411,7 +22658,7 @@ UPDATE_QEMU_CONFIG_VMSTATESTORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9])$"##;
 }
 
 #[test]
-fn test_regex_compilation_48() {
+fn test_regex_compilation_50() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_AFFINITY_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_BOOTDISK_RE;
@@ -23324,7 +23571,7 @@ UPDATE_QEMU_CONFIG_ASYNC_VMSTATESTORAGE_RE = r##"^(?i:[a-z][a-z0-9\-_.]*[a-z0-9]
 }
 
 #[test]
-fn test_regex_compilation_49() {
+fn test_regex_compilation_51() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_ASYNC_AFFINITY_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_ASYNC_BOOTDISK_RE;
@@ -24215,7 +24462,7 @@ UPDATE_QEMU_CONFIG_EFIDISK0_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_50() {
+fn test_regex_compilation_52() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_EFIDISK0_SIZE_RE;
 }
@@ -24300,7 +24547,7 @@ UPDATE_QEMU_CONFIG_IDE_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_51() {
+fn test_regex_compilation_53() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_IDE_MODEL_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_IDE_SERIAL_RE;
@@ -24656,7 +24903,7 @@ UPDATE_QEMU_CONFIG_SATA_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_52() {
+fn test_regex_compilation_54() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_SATA_SERIAL_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_SATA_SIZE_RE;
@@ -25001,7 +25248,7 @@ UPDATE_QEMU_CONFIG_SCSI_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_53() {
+fn test_regex_compilation_55() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_SCSI_SERIAL_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_SCSI_SIZE_RE;
@@ -25401,7 +25648,7 @@ UPDATE_QEMU_CONFIG_TPMSTATE0_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_54() {
+fn test_regex_compilation_56() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_TPMSTATE0_SIZE_RE;
 }
@@ -25464,7 +25711,7 @@ UPDATE_QEMU_CONFIG_VIRTIO_SIZE_RE = r##"^(\d+(\.\d+)?)([KMGT])?$"##;
 }
 
 #[test]
-fn test_regex_compilation_55() {
+fn test_regex_compilation_57() {
     use regex::Regex;
     let _: &Regex = &UPDATE_QEMU_CONFIG_VIRTIO_SERIAL_RE;
     let _: &Regex = &UPDATE_QEMU_CONFIG_VIRTIO_SIZE_RE;
@@ -25798,6 +26045,22 @@ pub struct UpdateQemuConfigVirtio {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub werror: Option<PveQmIdeWerror>,
+}
+
+#[api(
+    properties: {
+        description: {
+            optional: true,
+            type: String,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct UpdateQemuSnapshotConfig {
+    /// A textual description or comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[api(
