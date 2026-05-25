@@ -364,6 +364,7 @@ Schema2Rust::register_api_extensions('ClusterNodeStatus', {
     '/properties/name' => { description => sq("FIXME: Missing description in PVE.") },
 });
 api(GET => '/cluster/status', 'cluster_status', 'return-name' => 'ClusterNodeStatus');
+api(GET => '/cluster/nextid', 'cluster_nextid', 'output-type' => 'VmId');
 
 # api(GET => '/storage', 'list_storages', 'return-name' => 'StorageList');
 Schema2Rust::register_api_extensions('ListRealm', {

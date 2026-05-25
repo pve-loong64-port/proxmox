@@ -143,6 +143,47 @@ impl<'de> serde::Deserialize<'de> for PveUpid {
     }
 }
 
+/// A VMID as returned by PVE endpoints such as `/cluster/nextid`.
+///
+/// PVE serializes integer return values as JSON strings on older releases, so this deserializes
+/// tolerantly from either a JSON number or its string form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VmId(pub u32);
+
+impl From<VmId> for u32 {
+    fn from(id: VmId) -> u32 {
+        id.0
+    }
+}
+
+impl From<u32> for VmId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl std::fmt::Display for VmId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl serde::Serialize for VmId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for VmId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id: u32 = proxmox_serde::perl::deserialize_u32(deserializer)?;
+        Ok(VmId(id))
+    }
+}
+
 // FIXME: This is in `proxmox_schema::upid` and should be `pub` there instead.
 /// systemd-unit compatible escaping
 fn unescape_id(text: &str) -> Result<String, Error> {

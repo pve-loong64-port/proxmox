@@ -87,7 +87,6 @@
 /// - /cluster/metrics
 /// - /cluster/metrics/server
 /// - /cluster/metrics/server/{id}
-/// - /cluster/nextid
 /// - /cluster/notifications
 /// - /cluster/notifications/endpoints
 /// - /cluster/notifications/endpoints/gotify
@@ -434,6 +433,12 @@ pub trait PveClient {
         start_time: Option<i64>,
     ) -> Result<ClusterMetrics, Error> {
         Err(Error::Other("cluster_metrics_export not implemented"))
+    }
+
+    /// Get next free VMID. Pass a VMID to assert that its free (at time of
+    /// check).
+    async fn cluster_nextid(&self, vmid: Option<u32>) -> Result<VmId, Error> {
+        Err(Error::Other("cluster_nextid not implemented"))
     }
 
     /// Get datacenter options. Without 'Sys.Audit' on '/' not all options are
@@ -1880,6 +1885,15 @@ where
             .maybe_bool_arg("local-only", local_only)
             .maybe_arg("node-list", &node_list)
             .maybe_arg("start-time", &start_time)
+            .build();
+        Ok(self.0.get(url).await?.expect_json()?.data)
+    }
+
+    /// Get next free VMID. Pass a VMID to assert that its free (at time of
+    /// check).
+    async fn cluster_nextid(&self, vmid: Option<u32>) -> Result<VmId, Error> {
+        let url = &ApiPathBuilder::new("/api2/extjs/cluster/nextid")
+            .maybe_arg("vmid", &vmid)
             .build();
         Ok(self.0.get(url).await?.expect_json()?.data)
     }
