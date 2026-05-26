@@ -1,3 +1,16 @@
+rust-pve-api-types (8.1.11-1) trixie; urgency=medium
+
+  * fix deserializing 'GET /cluster/options' for the fields pve-cluster
+    pre-parses before returning them: ten property-string fields (crs, ha,
+    migration, next-id, notify, replication, tag-style, u2f, user-tag-access,
+    webauthn) are now typed as their dedicated sub-structs, and the
+    'registered-tags' and nested 'user-tag-access.user-allow-list' fields as
+    'Vec<String>', matching the actual wire shape instead of the schema's
+    Option<String> that failed to decode for any caller reading more than the
+    'location' field.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 26 May 2026 12:43:23 +0200
+
 rust-pve-api-types (8.1.10-1) trixie; urgency=medium
 
   * expose additional API endpoints: the cluster nextid lookup, used to obtain
