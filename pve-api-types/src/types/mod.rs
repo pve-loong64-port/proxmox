@@ -295,3 +295,100 @@ pub struct QemuCpuModel {
     /// CPU vendor visible to the guest when this model is selected. Vendor of 'reported-model' in case of custom models.
     pub vendor: String,
 }
+
+#[cfg(test)]
+mod cluster_options_wire_format {
+    //! Lock in the wire shape pve-cluster's parse_datacenter_config emits for GET /cluster/options.
+    //! The schema declares several fields as `type: string + format: PropertyString(...)`, but the
+    //! PVE handler pre-parses them into nested objects and splits two further fields into arrays of
+    //! strings before returning them. If a future generator change flips any of these fields back
+    //! to `Option<String>`, the unit tests below catch it.
+    use serde_json::json;
+
+    use crate::{
+        ClusterOptions, ClusterOptionsCrsHa, ClusterOptionsUserTagAccessUserAllow,
+        StartQemuMigrationType,
+    };
+
+    #[test]
+    fn deserializes_pre_parsed_objects_and_arrays() {
+        let wire = json!({
+            "allowed-tags": ["foo"],
+            "crs": { "ha": "static", "ha-rebalance-on-start": 1 },
+            "migration": { "type": "secure", "network": "10.0.0.0/24" },
+            "next-id": { "lower": 100, "upper": 999999 },
+            "tag-style": { "case-sensitive": 1 },
+            "user-tag-access": {
+                "user-allow": "list",
+                "user-allow-list": ["prod", "staging"],
+            },
+            "registered-tags": ["prod", "stage", "dev"],
+            // bwlimit and location are NOT pre-parsed on the wire; they stay property-strings.
+            // The retyping of their siblings must not flip them.
+            "bwlimit": "default=1024,migration=4096",
+            "location": "country=AT,city=Vienna",
+        });
+
+        let opts: ClusterOptions =
+            serde_json::from_value(wire).expect("deserialize pre-parsed wire");
+
+        let crs = opts.crs.as_ref().expect("crs object");
+        assert_eq!(crs.ha, Some(ClusterOptionsCrsHa::Static));
+        assert_eq!(crs.ha_rebalance_on_start, Some(true));
+
+        let mig = opts.migration.as_ref().expect("migration object");
+        assert_eq!(mig.ty, StartQemuMigrationType::Secure);
+        assert_eq!(mig.network.as_deref(), Some("10.0.0.0/24"));
+
+        let nid = opts.next_id.as_ref().expect("next-id object");
+        assert_eq!(nid.lower, Some(100));
+        assert_eq!(nid.upper, Some(999999));
+
+        let ts = opts.tag_style.as_ref().expect("tag-style object");
+        assert_eq!(ts.case_sensitive, Some(true));
+
+        let uta = opts.user_tag_access.as_ref().expect("user-tag-access object");
+        assert_eq!(uta.user_allow, Some(ClusterOptionsUserTagAccessUserAllow::List));
+        assert_eq!(
+            uta.user_allow_list.as_deref(),
+            Some(&["prod".to_string(), "staging".to_string()][..]),
+        );
+
+        assert_eq!(
+            opts.registered_tags.as_deref(),
+            Some(&["prod".to_string(), "stage".to_string(), "dev".to_string()][..]),
+        );
+
+        // Sanity: bwlimit and location stay a String even after the retype of their
+        // property-string siblings.
+        assert_eq!(opts.bwlimit.as_deref(), Some("default=1024,migration=4096"));
+        assert_eq!(opts.location.as_deref(), Some("country=AT,city=Vienna"));
+    }
+
+    #[test]
+    fn missing_and_partial_fields_deserialize() {
+        // crs, registered_tags, next_id, tag_style and the rest absent; one sub-struct field set
+        // partially (migration has only ty).
+        let wire = json!({
+            "allowed-tags": [],
+            "migration": { "type": "insecure" },
+            "user-tag-access": { "user-allow": "free" },
+        });
+
+        let opts: ClusterOptions =
+            serde_json::from_value(wire).expect("deserialize partial wire");
+
+        assert!(opts.crs.is_none());
+        assert!(opts.next_id.is_none());
+        assert!(opts.registered_tags.is_none());
+        assert!(opts.tag_style.is_none());
+
+        let mig = opts.migration.as_ref().expect("migration object");
+        assert_eq!(mig.ty, StartQemuMigrationType::Insecure);
+        assert!(mig.network.is_none());
+
+        let uta = opts.user_tag_access.as_ref().expect("user-tag-access object");
+        assert_eq!(uta.user_allow, Some(ClusterOptionsUserTagAccessUserAllow::Free));
+        assert!(uta.user_allow_list.is_none());
+    }
+}
