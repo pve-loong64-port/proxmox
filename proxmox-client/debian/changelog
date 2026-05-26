@@ -1,3 +1,12 @@
+rust-proxmox-client (1.0.3-1) trixie; urgency=medium
+
+  * extend the bad-fingerprint log output with guidance for the common case of
+    a rotated remote certificate, and point at the system log in the generic
+    TLS connection failure error, to nudge users toward the right diagnostic
+    when verification fails.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 26 May 2026 13:54:18 +0200
+
 rust-proxmox-client (1.0.2-1) trixie; urgency=medium
 
   * split Client error into Connect (never sent) and Client (likely sent)
