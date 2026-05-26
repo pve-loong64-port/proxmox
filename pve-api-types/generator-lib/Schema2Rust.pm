@@ -83,6 +83,26 @@ sub register_api_extensions : prototype($$) {
     }
 }
 
+our %FIELD_TYPE_OVERRIDES = ();
+# Override the emitted Rust type of a single field on a single generated struct, keyed by (struct
+# name, schema property name). For endpoints whose on-wire shape disagrees with the schema-declared
+# type, e.g. /cluster/options pre-parses several property-string fields into inline objects on its
+# return path; the schema still says `type: string`, so without this override the generator would
+# emit `Option<String>` and deserialization would fail.
+#
+# %extra options:
+#   attrs => [ "#[serde(...)]", ... ]   # additional serde/derive attributes
+#
+# Scoped narrowly on purpose: a generic "treat every PropertyString format as an object" rule would
+# be wrong (most such endpoints really do serialize the property-string form on the wire).
+sub register_field_type : prototype($$$;%) {
+    my ($struct_name, $field_name, $rust_type, %extra) = @_;
+    $FIELD_TYPE_OVERRIDES{$struct_name}->{$field_name} = {
+        type => $rust_type,
+        attrs => $extra{attrs} // [],
+    };
+}
+
 our %FORCE_ADDITIONAL_PROPERTIES = ();
 # Force a struct to accept and ignore unknown properties even when its schema
 # declares no additional properties. Keyed by the generated Rust type name.
@@ -1315,6 +1335,11 @@ my sub make_struct_field : prototype($$$$) {
     # of the type but part of the object-schema so pull it out early to clear the warning:
     my $optional = bool(delete $$inout_schema->{optional});
     handle_def($def, $inout_schema, namify_type($struct_name, $name));
+
+    if (my $ov = $FIELD_TYPE_OVERRIDES{$struct_name}->{$name}) {
+        $def->{type} = $ov->{type};
+        push $def->{attrs}->@*, $ov->{attrs}->@*;
+    }
 
     #my $schema = $$inout_schema;
     # (in case the type was already an option type, don't duplicate the `Option<>`)
