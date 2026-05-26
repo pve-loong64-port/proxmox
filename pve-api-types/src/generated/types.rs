@@ -2118,7 +2118,7 @@ pub struct ClusterOptions {
 
     /// Cluster resource scheduling settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub crs: Option<String>,
+    pub crs: Option<ClusterOptionsCrs>,
 
     /// Datacenter description. Shown in the web-interface datacenter notes
     /// panel. This is saved as comment inside the configuration file.
@@ -2135,7 +2135,7 @@ pub struct ClusterOptions {
 
     /// Cluster wide HA settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ha: Option<String>,
+    pub ha: Option<ClusterOptionsHa>,
 
     /// Specify external http proxy which is used for downloads (example: 'http://username:password@host:port/')
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2167,7 +2167,7 @@ pub struct ClusterOptions {
 
     /// For cluster wide migration settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub migration: Option<String>,
+    pub migration: Option<ClusterOptionsMigration>,
 
     /// Migration is secure using SSH tunnel by default. For secure private
     /// networks you can disable it to speed up migration. Deprecated, use the
@@ -2179,40 +2179,40 @@ pub struct ClusterOptions {
     /// Control the range for the free VMID auto-selection pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "next-id")]
-    pub next_id: Option<String>,
+    pub next_id: Option<ClusterOptionsNextId>,
 
     /// Cluster-wide notification settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notify: Option<String>,
+    pub notify: Option<ClusterOptionsNotify>,
 
     /// A list of tags that require a `Sys.Modify` on '/' to set and delete.
     /// Tags set here that are also in 'user-tag-access' also require
     /// `Sys.Modify`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "registered-tags")]
-    pub registered_tags: Option<String>,
+    pub registered_tags: Option<Vec<String>>,
 
     /// For cluster wide replication settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replication: Option<String>,
+    pub replication: Option<ClusterOptionsReplication>,
 
     /// Tag style options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "tag-style")]
-    pub tag_style: Option<String>,
+    pub tag_style: Option<ClusterOptionsTagStyle>,
 
     /// u2f
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub u2f: Option<String>,
+    pub u2f: Option<ClusterOptionsU2f>,
 
     /// Privilege options for user-settable tags
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "user-tag-access")]
-    pub user_tag_access: Option<String>,
+    pub user_tag_access: Option<ClusterOptionsUserTagAccess>,
 
     /// webauthn configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webauthn: Option<String>,
+    pub webauthn: Option<ClusterOptionsWebauthn>,
 }
 
 #[api(
@@ -2860,7 +2860,7 @@ pub struct ClusterOptionsUserTagAccess {
     /// for 'user-allow' values 'list' and 'existing'.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "user-allow-list")]
-    pub user_allow_list: Option<String>,
+    pub user_allow_list: Option<Vec<String>>,
 }
 
 #[api]

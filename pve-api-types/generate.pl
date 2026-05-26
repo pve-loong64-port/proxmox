@@ -442,6 +442,30 @@ Schema2Rust::register_format('pve-fw-conntrack-helper' => {
 });
 
 # options
+#
+# /cluster/options is special: pve-cluster's parse_datacenter_config pre-parses several
+# property-string fields into nested objects, and splits two further fields into arrays of strings,
+# before returning them. The schema still declares all of them as `type: string`, so override the
+# Rust field types on the return struct to match the actual wire shape. UpdateClusterOptions (the
+# PUT body) is left untouched because PVE's parameter validation expects the property-string form
+# on the way in.
+for my $field (
+    ['crs',              'ClusterOptionsCrs'],
+    ['ha',               'ClusterOptionsHa'],
+    ['migration',        'ClusterOptionsMigration'],
+    ['next-id',          'ClusterOptionsNextId'],
+    ['notify',           'ClusterOptionsNotify'],
+    ['replication',      'ClusterOptionsReplication'],
+    ['tag-style',        'ClusterOptionsTagStyle'],
+    ['u2f',              'ClusterOptionsU2f'],
+    ['user-tag-access',  'ClusterOptionsUserTagAccess'],
+    ['webauthn',         'ClusterOptionsWebauthn'],
+) {
+    Schema2Rust::register_field_type('ClusterOptions', $field->[0], $field->[1]);
+}
+Schema2Rust::register_field_type('ClusterOptions', 'registered-tags', 'Vec<String>');
+Schema2Rust::register_field_type('ClusterOptionsUserTagAccess', 'user-allow-list', 'Vec<String>');
+
 api(GET => '/cluster/options', 'cluster_options', 'return-name' => 'ClusterOptions');
 api(PUT => '/cluster/options', 'set_cluster_options', 'param-name' => 'UpdateClusterOptions');
 
