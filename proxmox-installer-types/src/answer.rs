@@ -41,6 +41,17 @@ proxmox_schema::const_regex! {
     pub SUBSCRIPTION_KEY_REGEX = r"^(?:pve[0-9]+|pbs|pmg)[cbsp]-[0-9a-f]{10}$";
 }
 
+proxmox_schema::const_regex! {
+    /// An email address using the regex for `<input type="email" />` elements
+    /// as defined in the [HTML specification].
+    /// Using that /should/ cover all possible cases that are encountered in the wild.
+    ///
+    /// It additionally checks whether the email our default email placeholder value.
+    ///
+    /// [HTML specification]: <https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address>
+    pub EMAIL_REGEX = r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$";
+}
+
 /// Schema for an optional Proxmox subscription key.
 #[cfg(feature = "api-types")]
 pub const SUBSCRIPTION_KEY_SCHEMA: proxmox_schema::Schema =
@@ -1253,4 +1264,15 @@ where
         Some(s) if !s.is_empty() => Ok(Some(s)),
         _ => Ok(None),
     }
+}
+
+/// Validates an email address according to [EMAIL_REGEX]
+pub fn email_validate(email: &str) -> Result<()> {
+    if !EMAIL_REGEX.is_match(email) {
+        bail!("Email does not look like a valid address (user@domain.tld)")
+    } else if email == crate::EMAIL_DEFAULT_PLACEHOLDER {
+        bail!("Invalid (default) email address")
+    }
+
+    Ok(())
 }
