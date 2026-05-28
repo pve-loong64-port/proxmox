@@ -726,7 +726,25 @@ impl DiskSetup {
                     None | Some(ZfsOptions { raid: None, .. }) => {
                         bail!("ZFS raid level 'zfs.raid' must be set");
                     }
-                    Some(opts) => Ok(FilesystemOptions::Zfs(opts)),
+                    Some(opts) => {
+                        // safe: the previous arm already covered raid = None
+                        let raid = opts.raid.unwrap();
+                        // a filter-based selection resolves disks only at install time;
+                        // only an explicit disk-list is checkable here
+                        if !self.disk_list.is_empty() {
+                            let n = self.disk_list.len();
+                            if n < raid.min_disks() {
+                                bail!(
+                                    "ZFS {raid} needs at least {} disks, got {n}",
+                                    raid.min_disks(),
+                                );
+                            }
+                            if raid.requires_even_disks() && n % 2 != 0 {
+                                bail!("ZFS {raid} needs an even number of disks, got {n}");
+                            }
+                        }
+                        Ok(FilesystemOptions::Zfs(opts))
+                    }
                 }
             }
             Filesystem::Btrfs => {
@@ -737,7 +755,25 @@ impl DiskSetup {
                     None | Some(BtrfsOptions { raid: None, .. }) => {
                         bail!("Btrfs raid level 'btrfs.raid' must be set");
                     }
-                    Some(opts) => Ok(FilesystemOptions::Btrfs(opts)),
+                    Some(opts) => {
+                        // safe: the previous arm already covered raid = None
+                        let raid = opts.raid.unwrap();
+                        // a filter-based selection resolves disks only at install time;
+                        // only an explicit disk-list is checkable here
+                        if !self.disk_list.is_empty() {
+                            let n = self.disk_list.len();
+                            if n < raid.min_disks() {
+                                bail!(
+                                    "Btrfs {raid} needs at least {} disks, got {n}",
+                                    raid.min_disks(),
+                                );
+                            }
+                            if raid.requires_even_disks() && n % 2 != 0 {
+                                bail!("Btrfs {raid} needs an even number of disks, got {n}");
+                            }
+                        }
+                        Ok(FilesystemOptions::Btrfs(opts))
+                    }
                 }
             }
         }
@@ -1045,6 +1081,23 @@ pub enum BtrfsRaidLevel {
 
 serde_plain::derive_display_from_serialize!(BtrfsRaidLevel);
 
+impl BtrfsRaidLevel {
+    /// Minimum number of disks required for this RAID level.
+    pub fn min_disks(self) -> usize {
+        match self {
+            Self::Raid0 => 1,
+            Self::Raid1 => 2,
+            Self::Raid10 => 4,
+        }
+    }
+
+    /// Whether this RAID level requires an even number of disks
+    /// (e.g. RAID10, which is a stripe of mirrors).
+    pub fn requires_even_disks(self) -> bool {
+        matches!(self, Self::Raid10)
+    }
+}
+
 #[cfg_attr(feature = "api-types", api)]
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -1100,6 +1153,26 @@ pub enum ZfsRaidLevel {
 }
 
 serde_plain::derive_display_from_serialize!(ZfsRaidLevel);
+
+impl ZfsRaidLevel {
+    /// Minimum number of disks required for this RAID level.
+    pub fn min_disks(self) -> usize {
+        match self {
+            Self::Raid0 => 1,
+            Self::Raid1 => 2,
+            Self::Raid10 => 4,
+            Self::RaidZ => 3,
+            Self::RaidZ2 => 4,
+            Self::RaidZ3 => 5,
+        }
+    }
+
+    /// Whether this RAID level requires an even number of disks
+    /// (e.g. RAID10, which is a stripe of mirrors).
+    pub fn requires_even_disks(self) -> bool {
+        matches!(self, Self::Raid10)
+    }
+}
 
 #[cfg_attr(feature = "api-types", api)]
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -1275,4 +1348,107 @@ pub fn email_validate(email: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disks(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("sd{i}")).collect()
+    }
+
+    fn zfs(raid: ZfsRaidLevel, n: usize) -> DiskSetup {
+        DiskSetup {
+            filesystem: Filesystem::Zfs,
+            disk_list: disks(n),
+            filter: BTreeMap::new(),
+            filter_match: None,
+            zfs: Some(ZfsOptions {
+                raid: Some(raid),
+                ..Default::default()
+            }),
+            lvm: None,
+            btrfs: None,
+        }
+    }
+
+    fn btrfs(raid: BtrfsRaidLevel, n: usize) -> DiskSetup {
+        DiskSetup {
+            filesystem: Filesystem::Btrfs,
+            disk_list: disks(n),
+            filter: BTreeMap::new(),
+            filter_match: None,
+            zfs: None,
+            lvm: None,
+            btrfs: Some(BtrfsOptions {
+                raid: Some(raid),
+                ..Default::default()
+            }),
+        }
+    }
+
+    // Exercises both the min-disks branch and the min_disks() constants
+    // themselves through observed behavior, so no separate constant test is
+    // needed.
+    #[test]
+    fn filesystem_details_enforces_min_disks_per_raid_level() {
+        use BtrfsRaidLevel as B;
+        use ZfsRaidLevel as Z;
+        for v in [
+            Z::Raid0,
+            Z::Raid1,
+            Z::Raid10,
+            Z::RaidZ,
+            Z::RaidZ2,
+            Z::RaidZ3,
+        ] {
+            let min = v.min_disks();
+            if min > 1 {
+                assert!(zfs(v, min - 1).filesystem_details().is_err(), "ZFS {v}");
+            }
+            assert!(zfs(v, min).filesystem_details().is_ok(), "ZFS {v}");
+        }
+        for v in [B::Raid0, B::Raid1, B::Raid10] {
+            let min = v.min_disks();
+            if min > 1 {
+                assert!(btrfs(v, min - 1).filesystem_details().is_err(), "Btrfs {v}");
+            }
+            assert!(btrfs(v, min).filesystem_details().is_ok(), "Btrfs {v}");
+        }
+    }
+
+    #[test]
+    fn filesystem_details_rejects_raid10_with_odd_disks() {
+        // five disks pass the min-disks check (>= 4) and must trip the
+        // even-disks check; covers both ZFS and Btrfs RAID10
+        assert!(zfs(ZfsRaidLevel::Raid10, 5).filesystem_details().is_err());
+        assert!(
+            btrfs(BtrfsRaidLevel::Raid10, 5)
+                .filesystem_details()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn filesystem_details_skips_disk_count_for_filter_selection() {
+        // a filter-based selection resolves disks only at install time, so an
+        // empty disk_list must not be rejected even for a RAID level needing
+        // many disks
+        let mut filter = BTreeMap::new();
+        filter.insert("size".to_string(), ">100G".to_string());
+        let setup = DiskSetup {
+            filesystem: Filesystem::Zfs,
+            disk_list: Vec::new(),
+            filter,
+            filter_match: None,
+            zfs: Some(ZfsOptions {
+                raid: Some(ZfsRaidLevel::Raid10),
+                ..Default::default()
+            }),
+            lvm: None,
+            btrfs: None,
+        };
+        assert!(setup.filesystem_details().is_ok());
+    }
 }
