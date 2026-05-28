@@ -1,3 +1,21 @@
+rust-proxmox-installer-types (0.1.1-1) trixie; urgency=medium
+
+  * answer: declare `arc_max`, `copies`, and `minfree` in the filesystem
+    options api schema so PDM and the automated installer accept answer files
+    that set these ZFS / LVM tuning properties instead of rejecting them with
+    a `400 Bad Request`.
+
+  * answer: expose the `email_validate` function so downstream consumers like
+    the PDM UI that generate answer files can apply the same check as
+    pve-installer itself, keeping address validation consistent across UIs.
+
+  * answer: validate the disk count against the selected ZFS/Btrfs RAID level
+    on save when the prepared answer pins explicit disks, so impossible setups
+    like RAIDZ-1 with one disk are rejected up front instead of failing only
+    at install time.
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 28 May 2026 14:56:34 +0200
+
 rust-proxmox-installer-types (0.1.0-1) trixie; urgency=medium
 
   * initial release of proxmox-installer-types, a crate carrying the data
