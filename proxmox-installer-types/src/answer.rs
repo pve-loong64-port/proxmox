@@ -509,12 +509,28 @@ impl ApiType for FilesystemOptions {
         "Filesystem-specific options to set on the root disk.",
         &[
             (
+                "arc_max",
+                true,
+                &IntegerSchema::new("Maximum ARC size that ZFS should use, in MiB")
+                    .minimum(64)
+                    .schema(),
+            ),
+            (
                 "ashift",
                 true,
                 &IntegerSchema::new("`ashift` value to create the zpool with.")
                     .minimum(9)
                     .maximum(16)
                     .default(12)
+                    .schema(),
+            ),
+            (
+                "copies",
+                true,
+                &IntegerSchema::new("`copies` value to create the zpool with.")
+                    .minimum(1)
+                    .maximum(3)
+                    .default(1)
                     .schema(),
             ),
             ("filesystem", false, &Filesystem::API_SCHEMA),
@@ -547,6 +563,15 @@ impl ApiType for FilesystemOptions {
                 &NumberSchema::new("Maximum size of the `data` volume, in GiB.")
                     .minimum(0.)
                     .schema(),
+            ),
+            (
+                "minfree",
+                true,
+                &NumberSchema::new(
+                    "Minimum amount of free space that should be left in the LVM volume group.",
+                )
+                .minimum(0.)
+                .schema(),
             ),
             (
                 "swapsize",
