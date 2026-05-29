@@ -9869,6 +9869,126 @@ pub struct LxcStatus {
     pub vmid: u32,
 }
 
+#[api(
+    properties: {
+        port: {
+            type: Integer,
+            description: "Termproxy port.",
+        },
+        ticket: {
+            type: String,
+            description: "Termproxy ticket.",
+        },
+        upid: {
+            type: String,
+            description: "Termproxy UPID.",
+        },
+        user: {
+            type: String,
+            description: "Termproxy user.",
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct LxcTermTicket {
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    pub port: i64,
+
+    pub ticket: String,
+
+    pub upid: String,
+
+    pub user: String,
+}
+
+#[api(
+    properties: {
+        height: {
+            maximum: 2160,
+            minimum: 16,
+            optional: true,
+            type: Integer,
+        },
+        websocket: {
+            default: false,
+            optional: true,
+        },
+        width: {
+            maximum: 4096,
+            minimum: 16,
+            optional: true,
+            type: Integer,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct LxcVncProxy {
+    /// sets the height of the console in pixels.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_u16")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u16>,
+
+    /// use websocket instead of standard VNC.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket: Option<bool>,
+
+    /// sets the width of the console in pixels.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_u16")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u16>,
+}
+
+#[api(
+    properties: {
+        cert: {
+            type: String,
+            description: "Vncproxy certificate.",
+        },
+        password: {
+            optional: true,
+            type: String,
+        },
+        port: {
+            type: Integer,
+            description: "Vncproxy port.",
+        },
+        ticket: {
+            type: String,
+            description: "Vncproxy ticket.",
+        },
+        upid: {
+            type: String,
+            description: "Vncproxy UPID.",
+        },
+        user: {
+            type: String,
+            description: "Vncproxy user.",
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct LxcVncTicket {
+    pub cert: String,
+
+    /// Password used for authentication within the VNC protocol. Consists of
+    /// printable ASCII characters ('!' .. '~').
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    pub port: i64,
+
+    pub ticket: String,
+
+    pub upid: String,
+
+    pub user: String,
+}
+
 const_regex! {
 
 MIGRATE_LXC_TARGET_RE = r##"^(?i:[a-z0-9](?i:[a-z0-9\-]*[a-z0-9])?)$"##;
@@ -18568,6 +18688,153 @@ pub struct QemuStatus {
     /// The (unique) ID of the VM.
     #[serde(deserialize_with = "proxmox_serde::perl::deserialize_u32")]
     pub vmid: u32,
+}
+
+#[api(
+    properties: {
+        serial: {
+            optional: true,
+            type: QemuTermProxySerial,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct QemuTermProxy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<QemuTermProxySerial>,
+}
+
+#[api]
+/// opens a serial terminal (defaults to display)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum QemuTermProxySerial {
+    #[serde(rename = "serial0")]
+    /// serial0.
+    Serial0,
+    #[serde(rename = "serial1")]
+    /// serial1.
+    Serial1,
+    #[serde(rename = "serial2")]
+    /// serial2.
+    Serial2,
+    #[serde(rename = "serial3")]
+    /// serial3.
+    Serial3,
+    /// Unknown variants for forward compatibility.
+    #[serde(untagged)]
+    UnknownEnumValue(FixedString),
+}
+serde_plain::derive_display_from_serialize!(QemuTermProxySerial);
+serde_plain::derive_fromstr_from_deserialize!(QemuTermProxySerial);
+
+#[api(
+    properties: {
+        port: {
+            type: Integer,
+            description: "Termproxy port.",
+        },
+        ticket: {
+            type: String,
+            description: "Termproxy ticket.",
+        },
+        upid: {
+            type: String,
+            description: "Termproxy UPID.",
+        },
+        user: {
+            type: String,
+            description: "Termproxy user.",
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct QemuTermTicket {
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    pub port: i64,
+
+    pub ticket: String,
+
+    pub upid: String,
+
+    pub user: String,
+}
+
+#[api(
+    properties: {
+        "generate-password": {
+            default: false,
+            optional: true,
+        },
+        websocket: {
+            default: false,
+            optional: true,
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct QemuVncProxy {
+    /// Deprecated, do not use. Password is generated when required.
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "generate-password")]
+    pub generate_password: Option<bool>,
+
+    /// Prepare for websocket upgrade (only required when using serial terminal,
+    /// otherwise upgrade is always possible).
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket: Option<bool>,
+}
+
+#[api(
+    properties: {
+        cert: {
+            type: String,
+            description: "Vncproxy certificate.",
+        },
+        password: {
+            optional: true,
+            type: String,
+        },
+        port: {
+            type: Integer,
+            description: "Vncproxy port.",
+        },
+        ticket: {
+            type: String,
+            description: "Vncproxy ticket.",
+        },
+        upid: {
+            type: String,
+            description: "Vncproxy UPID.",
+        },
+        user: {
+            type: String,
+            description: "Vncproxy user.",
+        },
+    },
+)]
+/// Object.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct QemuVncTicket {
+    pub cert: String,
+
+    /// Password used for authentication within the VNC protocol. Consists of
+    /// printable ASCII characters ('!' .. '~').
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    #[serde(deserialize_with = "proxmox_serde::perl::deserialize_i64")]
+    pub port: i64,
+
+    pub ticket: String,
+
+    pub upid: String,
+
+    pub user: String,
 }
 
 #[api(

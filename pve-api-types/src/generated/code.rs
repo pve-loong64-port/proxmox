@@ -198,8 +198,6 @@
 /// - /nodes/{node}/lxc/{vmid}/status/resume
 /// - /nodes/{node}/lxc/{vmid}/status/suspend
 /// - /nodes/{node}/lxc/{vmid}/template
-/// - /nodes/{node}/lxc/{vmid}/termproxy
-/// - /nodes/{node}/lxc/{vmid}/vncproxy
 /// - /nodes/{node}/lxc/{vmid}/vncwebsocket
 /// - /nodes/{node}/migrateall
 /// - /nodes/{node}/netstat
@@ -250,9 +248,7 @@
 /// - /nodes/{node}/qemu/{vmid}/status/reset
 /// - /nodes/{node}/qemu/{vmid}/status/suspend
 /// - /nodes/{node}/qemu/{vmid}/template
-/// - /nodes/{node}/qemu/{vmid}/termproxy
 /// - /nodes/{node}/qemu/{vmid}/unlink
-/// - /nodes/{node}/qemu/{vmid}/vncproxy
 /// - /nodes/{node}/qemu/{vmid}/vncwebsocket
 /// - /nodes/{node}/query-oci-repo-tags
 /// - /nodes/{node}/query-url-metadata
@@ -1187,6 +1183,11 @@ pub trait PveClient {
         Err(Error::Other("lxc_resize not implemented"))
     }
 
+    /// Creates a TCP proxy connection.
+    async fn lxc_termproxy(&self, node: &str, vmid: u32) -> Result<LxcTermTicket, Error> {
+        Err(Error::Other("lxc_termproxy not implemented"))
+    }
+
     /// Set container options.
     async fn lxc_update_config(
         &self,
@@ -1195,6 +1196,16 @@ pub trait PveClient {
         params: UpdateLxcConfig,
     ) -> Result<(), Error> {
         Err(Error::Other("lxc_update_config not implemented"))
+    }
+
+    /// Creates a TCP VNC proxy connections.
+    async fn lxc_vncproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: LxcVncProxy,
+    ) -> Result<LxcVncTicket, Error> {
+        Err(Error::Other("lxc_vncproxy not implemented"))
     }
 
     /// Migrate the container to another node. Creates a new migration task.
@@ -1408,6 +1419,16 @@ pub trait PveClient {
         Err(Error::Other("qemu_resize not implemented"))
     }
 
+    /// Creates a TCP proxy connections.
+    async fn qemu_termproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: QemuTermProxy,
+    ) -> Result<QemuTermTicket, Error> {
+        Err(Error::Other("qemu_termproxy not implemented"))
+    }
+
     /// Set virtual machine options (synchronous API) - You should consider
     /// using the POST method instead for any actions involving hotplug or
     /// storage allocation.
@@ -1428,6 +1449,16 @@ pub trait PveClient {
         params: UpdateQemuConfigAsync,
     ) -> Result<Option<PveUpid>, Error> {
         Err(Error::Other("qemu_update_config_async not implemented"))
+    }
+
+    /// Creates a TCP VNC proxy connections.
+    async fn qemu_vncproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: QemuVncProxy,
+    ) -> Result<QemuVncTicket, Error> {
+        Err(Error::Other("qemu_vncproxy not implemented"))
     }
 
     /// Release global lock for SDN configuration
@@ -3264,6 +3295,21 @@ where
         Ok(self.0.put(url, &params).await?.expect_json()?.data)
     }
 
+    /// Creates a TCP proxy connection.
+    async fn lxc_termproxy(&self, node: &str, vmid: u32) -> Result<LxcTermTicket, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/termproxy",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self
+            .0
+            .post(url, &serde_json::Value::Null)
+            .await?
+            .expect_json()?
+            .data)
+    }
+
     /// Set container options.
     async fn lxc_update_config(
         &self,
@@ -3277,6 +3323,21 @@ where
             vmid
         );
         self.0.put(url, &params).await?.nodata()
+    }
+
+    /// Creates a TCP VNC proxy connections.
+    async fn lxc_vncproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: LxcVncProxy,
+    ) -> Result<LxcVncTicket, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/lxc/{}/vncproxy",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
     }
 
     /// Migrate the container to another node. Creates a new migration task.
@@ -3622,6 +3683,21 @@ where
         Ok(self.0.put(url, &params).await?.expect_json()?.data)
     }
 
+    /// Creates a TCP proxy connections.
+    async fn qemu_termproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: QemuTermProxy,
+    ) -> Result<QemuTermTicket, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/termproxy",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
     /// Set virtual machine options (synchronous API) - You should consider
     /// using the POST method instead for any actions involving hotplug or
     /// storage allocation.
@@ -3648,6 +3724,21 @@ where
     ) -> Result<Option<PveUpid>, Error> {
         let url = &format!(
             "/api2/extjs/nodes/{}/qemu/{}/config",
+            percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
+            vmid
+        );
+        Ok(self.0.post(url, &params).await?.expect_json()?.data)
+    }
+
+    /// Creates a TCP VNC proxy connections.
+    async fn qemu_vncproxy(
+        &self,
+        node: &str,
+        vmid: u32,
+        params: QemuVncProxy,
+    ) -> Result<QemuVncTicket, Error> {
+        let url = &format!(
+            "/api2/extjs/nodes/{}/qemu/{}/vncproxy",
             percent_encode(node.as_bytes(), percent_encoding::NON_ALPHANUMERIC),
             vmid
         );

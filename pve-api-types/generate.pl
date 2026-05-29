@@ -284,6 +284,21 @@ Schema2Rust::derive('CreateQemuSnapshot' => 'Default');
 Schema2Rust::derive('DeleteQemuSnapshot' => 'Default');
 Schema2Rust::derive('RollbackQemuSnapshot' => 'Default');
 Schema2Rust::derive('UpdateQemuSnapshotConfig' => 'Default');
+api(POST => '/nodes/{node}/qemu/{vmid}/termproxy', 'qemu_termproxy', 'param-name' => 'QemuTermProxy', 'return-name' => 'QemuTermTicket');
+Schema2Rust::register_api_extensions('QemuTermTicket', {
+    '/properties/port' => { description => sq("Termproxy port.") },
+    '/properties/ticket' => { description => sq("Termproxy ticket.") },
+    '/properties/upid' => { description => sq("Termproxy UPID.") },
+    '/properties/user' => { description => sq("Termproxy user.") },
+});
+api(POST => '/nodes/{node}/qemu/{vmid}/vncproxy', 'qemu_vncproxy', 'param-name' => 'QemuVncProxy', 'return-name' => 'QemuVncTicket');
+Schema2Rust::register_api_extensions('QemuVncTicket', {
+    '/properties/cert' => { description => sq("Vncproxy certificate.") },
+    '/properties/port' => { description => sq("Vncproxy port.") },
+    '/properties/ticket' => { description => sq("Vncproxy ticket.") },
+    '/properties/upid' => { description => sq("Vncproxy UPID.") },
+    '/properties/user' => { description => sq("Vncproxy user.") },
+});
 
 api(GET => '/nodes/{node}/lxc',                         'list_lxc',            'param-name' => 'FixmeListLxc',      'return-name' => 'LxcEntry');
 api(GET => '/nodes/{node}/lxc/{vmid}/config',           'lxc_get_config',      'param-name' => 'FixmeLxcGetConfig', 'return-name' => 'LxcConfig');
@@ -313,6 +328,21 @@ Schema2Rust::derive('CreateLxcSnapshot' => 'Default');
 Schema2Rust::derive('DeleteLxcSnapshot' => 'Default');
 Schema2Rust::derive('RollbackLxcSnapshot' => 'Default');
 Schema2Rust::derive('UpdateLxcSnapshotConfig' => 'Default');
+api(POST => '/nodes/{node}/lxc/{vmid}/termproxy', 'lxc_termproxy', 'param-name' => 'LxcTermProxy', 'return-name' => 'LxcTermTicket');
+Schema2Rust::register_api_extensions('LxcTermTicket', {
+    '/properties/port' => { description => sq("Termproxy port.") },
+    '/properties/ticket' => { description => sq("Termproxy ticket.") },
+    '/properties/upid' => { description => sq("Termproxy UPID.") },
+    '/properties/user' => { description => sq("Termproxy user.") },
+});
+api(POST => '/nodes/{node}/lxc/{vmid}/vncproxy', 'lxc_vncproxy', 'param-name' => 'LxcVncProxy', 'return-name' => 'LxcVncTicket');
+Schema2Rust::register_api_extensions('LxcVncTicket', {
+    '/properties/cert' => { description => sq("Vncproxy certificate.") },
+    '/properties/port' => { description => sq("Vncproxy port.") },
+    '/properties/ticket' => { description => sq("Vncproxy ticket.") },
+    '/properties/upid' => { description => sq("Vncproxy UPID.") },
+    '/properties/user' => { description => sq("Vncproxy user.") },
+});
 
 Schema2Rust::register_enum_variant('ListNetworksType::OVSBridge' => 'OvsBridge');
 Schema2Rust::register_enum_variant('ListNetworksType::OVSBond' => 'OvsBond');
