@@ -1,3 +1,13 @@
+rust-proxmox-client (1.0.4-1) trixie; urgency=medium
+
+  * only classify a connection-establishment failure (DNS, TCP, TLS handshake)
+    as a connect error; a TLS error surfacing after the connection is up is now
+    a client error. As connect errors are retried regardless of the HTTP
+    method, this avoids repeating a request that may already have reached the
+    server.
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 29 May 2026 23:45:01 +0200
+
 rust-proxmox-client (1.0.3-1) trixie; urgency=medium
 
   * extend the bad-fingerprint log output with guidance for the common case of
