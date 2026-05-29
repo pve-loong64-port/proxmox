@@ -347,8 +347,14 @@ mod cluster_options_wire_format {
         let ts = opts.tag_style.as_ref().expect("tag-style object");
         assert_eq!(ts.case_sensitive, Some(true));
 
-        let uta = opts.user_tag_access.as_ref().expect("user-tag-access object");
-        assert_eq!(uta.user_allow, Some(ClusterOptionsUserTagAccessUserAllow::List));
+        let uta = opts
+            .user_tag_access
+            .as_ref()
+            .expect("user-tag-access object");
+        assert_eq!(
+            uta.user_allow,
+            Some(ClusterOptionsUserTagAccessUserAllow::List)
+        );
         assert_eq!(
             uta.user_allow_list.as_deref(),
             Some(&["prod".to_string(), "staging".to_string()][..]),
@@ -375,8 +381,7 @@ mod cluster_options_wire_format {
             "user-tag-access": { "user-allow": "free" },
         });
 
-        let opts: ClusterOptions =
-            serde_json::from_value(wire).expect("deserialize partial wire");
+        let opts: ClusterOptions = serde_json::from_value(wire).expect("deserialize partial wire");
 
         assert!(opts.crs.is_none());
         assert!(opts.next_id.is_none());
@@ -387,8 +392,14 @@ mod cluster_options_wire_format {
         assert_eq!(mig.ty, StartQemuMigrationType::Insecure);
         assert!(mig.network.is_none());
 
-        let uta = opts.user_tag_access.as_ref().expect("user-tag-access object");
-        assert_eq!(uta.user_allow, Some(ClusterOptionsUserTagAccessUserAllow::Free));
+        let uta = opts
+            .user_tag_access
+            .as_ref()
+            .expect("user-tag-access object");
+        assert_eq!(
+            uta.user_allow,
+            Some(ClusterOptionsUserTagAccessUserAllow::Free)
+        );
         assert!(uta.user_allow_list.is_none());
     }
 }
