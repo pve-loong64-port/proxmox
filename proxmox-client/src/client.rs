@@ -589,7 +589,18 @@ fn fp_string(fp: &[u8]) -> String {
 /// likely already sent (hyper-util retries stale pool connections internally), so only idempotent
 /// requests should be retried.
 fn classify_client_error(err: anyhow::Error) -> Error {
-    // TLS handshake failures are connection-establishment errors.
+    // Gate on is_connect(): only a connector failure (DNS, TCP, TLS handshake) is guaranteed to
+    // predate the request reaching the server. A post-connection TLS error also carries an OpenSSL
+    // error in its chain, so matching on that alone would misclassify it as a connect error.
+    let is_connect = err
+        .downcast_ref::<hyper_util::client::legacy::Error>()
+        .is_some_and(hyper_util::client::legacy::Error::is_connect);
+
+    if !is_connect {
+        return Error::Client(err.into());
+    }
+
+    // enrich a TLS handshake failure with a fingerprint/certificate hint
     for cause in err.chain() {
         if let Some(ssl_err) = cause.downcast_ref::<openssl::error::ErrorStack>() {
             return Error::Connect(
@@ -603,15 +614,7 @@ fn classify_client_error(err: anyhow::Error) -> Error {
         }
     }
 
-    let is_connect = err
-        .downcast_ref::<hyper_util::client::legacy::Error>()
-        .is_some_and(hyper_util::client::legacy::Error::is_connect);
-
-    if is_connect {
-        Error::Connect(err.into())
-    } else {
-        Error::Client(err.into())
-    }
+    Error::Connect(err.into())
 }
 
 impl Error {
@@ -653,5 +656,35 @@ impl AuthenticationKind {
             AuthenticationKind::Ticket(auth) => &auth.userid,
             AuthenticationKind::Token(auth) => &auth.userid,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_client_error;
+    use crate::Error;
+
+    /// A TLS-level error that is not a connection-establishment failure (no hyper-util connect error
+    /// in the chain) must classify as [`Error::Client`], never [`Error::Connect`]: it can occur
+    /// after the request was already sent, so it must not become eligible for the method-agnostic
+    /// connect-error retry.
+    #[test]
+    fn post_connect_openssl_error_is_client_not_connect() {
+        let ssl_err = openssl::x509::X509::from_pem(b"-- not a certificate --")
+            .expect_err("parsing a bogus certificate must fail with an OpenSSL error");
+        let err = anyhow::Error::from(ssl_err);
+
+        // precondition: the error carries an OpenSSL ErrorStack, which the previous implementation
+        // matched first and wrongly classified as a connect error
+        assert!(
+            err.chain()
+                .any(|cause| cause.downcast_ref::<openssl::error::ErrorStack>().is_some()),
+            "expected an OpenSSL ErrorStack in the error chain",
+        );
+
+        assert!(
+            matches!(classify_client_error(err), Error::Client(_)),
+            "a post-connect OpenSSL error must classify as Client, not Connect",
+        );
     }
 }
