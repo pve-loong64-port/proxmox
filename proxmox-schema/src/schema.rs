@@ -1273,19 +1273,19 @@ mod private {
 /// leaves `map` unchanged and returns a [`ParameterError`].
 fn rename_aliases_to_canonicals(
     map: &mut serde_json::Map<String, Value>,
-    aliases_present: &[(String, &'static str)],
+    aliases_present: &[(&str, &'static str)],
 ) -> Result<(), Error> {
     let mut errors = ParameterError::new();
     let mut seen_canonical: HashSet<&'static str> = HashSet::new();
     for (alias_key, canonical) in aliases_present {
         if map.contains_key(*canonical) {
             errors.push(
-                alias_key.clone(),
+                alias_key.to_string(),
                 format_err!("cannot set both `{canonical}` and `{alias_key}`."),
             );
         } else if !seen_canonical.insert(canonical) {
             errors.push(
-                alias_key.clone(),
+                alias_key.to_string(),
                 format_err!("cannot set both `{alias_key}` and another alias of `{canonical}`."),
             );
         }
@@ -1294,7 +1294,7 @@ fn rename_aliases_to_canonicals(
         return Err(errors.into());
     }
     for (alias_key, canonical) in aliases_present {
-        let v = map.remove(alias_key).expect("alias key was just observed");
+        let v = map.remove(*alias_key).expect("alias key was just observed");
         map.insert(canonical.to_string(), v);
     }
     Ok(())
@@ -1331,19 +1331,7 @@ pub trait ObjectSchemaType: private::Sealed + Send + Sync {
     /// [`lookup_alias`](Self::lookup_alias); concrete schema kinds that can find their alias
     /// list more directly (such as [`ObjectSchema`]'s static sidecar) override this. No-op
     /// for schemas with no declared aliases and for non-object values.
-    fn canonicalize_aliases(&self, value: &mut Value) -> Result<(), Error> {
-        let Some(map) = value.as_object_mut() else {
-            return Ok(());
-        };
-        let aliases: Vec<(String, &'static str)> = map
-            .keys()
-            .filter_map(|k| self.lookup_alias(k).map(|c| (k.clone(), c)))
-            .collect();
-        if aliases.is_empty() {
-            return Ok(());
-        }
-        rename_aliases_to_canonicals(map, &aliases)
-    }
+    fn canonicalize_aliases(&self, value: &mut Value) -> Result<(), Error>;
 
     /// Should always return `None`, unless dealing with *legacy* PVE property strings.
     fn key_alias_info(&self) -> Option<KeyAliasInfo> {
@@ -1477,11 +1465,11 @@ impl ObjectSchemaType for ObjectSchema {
         let Some(map) = value.as_object_mut() else {
             return Ok(());
         };
-        let aliases: Vec<(String, &'static str)> = self
+        let aliases: Vec<(&str, &'static str)> = self
             .property_aliases
             .iter()
             .filter(|&&(alias, _canonical)| map.contains_key(alias))
-            .map(|&(alias, canonical)| (alias.to_string(), canonical))
+            .map(|&(alias, canonical)| (alias, canonical))
             .collect();
         if aliases.is_empty() {
             return Ok(());
@@ -1634,6 +1622,23 @@ impl ObjectSchemaType for OneOfSchema {
                 .expect("non-object-schema in `OneOfSchema`")
                 .lookup_alias(key),
         })
+    }
+
+    /// Forwards to each sub-schema so the specialized per-schema-kind logic runs (e.g. an
+    /// inner [`ObjectSchema`] uses its sidecar and skips schemas without aliases).
+    fn canonicalize_aliases(&self, value: &mut Value) -> Result<(), Error> {
+        for (_, schema) in self.list {
+            // a oneOf may carry a single plain-string variant; it has no properties to
+            // canonicalize, so skip it like `lookup_alias` and `additional_properties` do.
+            match schema {
+                Schema::String(_) => continue,
+                _ => schema
+                    .any_object()
+                    .expect("non-object-schema in `OneOfSchema`")
+                    .canonicalize_aliases(value)?,
+            }
+        }
+        Ok(())
     }
 
     fn verify_json(&self, data: &Value) -> Result<(), Error> {

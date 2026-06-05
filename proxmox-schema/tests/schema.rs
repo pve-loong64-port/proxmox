@@ -592,6 +592,36 @@ fn test_property_aliases_in_all_of() {
 }
 
 #[test]
+fn test_property_aliases_in_one_of_with_string_variant() {
+    // A oneOf may carry a plain-string variant alongside object variants. Canonicalizing
+    // aliases must skip that variant instead of unwrapping it as an object and panicking.
+    const OBJ: Schema = ObjectSchema::new(
+        "Obj.",
+        &[
+            ("mode", false, &StringSchema::new("Mode.").schema()),
+            ("type", false, &StringSchema::new("variant").schema()),
+        ],
+    )
+    .property_aliases(&[("legacy-mode", "mode")])
+    .schema();
+    const SCHEMA: OneOfSchema = OneOfSchema::new(
+        "A string or some object.",
+        &("type", false, &StringSchema::new("variant").schema()),
+        &[
+            ("obj", &OBJ),
+            ("plain", &StringSchema::new("A plain string.").schema()),
+        ],
+    );
+
+    let mut body = json!({"type": "obj", "legacy-mode": "fast"});
+    SCHEMA
+        .canonicalize_aliases(&mut body)
+        .expect("string variant skipped, alias rewritten");
+    assert_eq!(body["mode"], "fast");
+    assert!(body.get("legacy-mode").is_none());
+}
+
+#[test]
 #[should_panic(expected = "oneOf can have only zero or one string variants")]
 fn test_one_of_schema_with_multiple_string_variant() {
     const OBJECT1_SCHEMA: Schema = ObjectSchema::new(
