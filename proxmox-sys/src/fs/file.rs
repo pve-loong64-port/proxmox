@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 #[cfg(feature = "timer")]
 use std::time::Duration;
@@ -177,9 +177,7 @@ pub fn replace_file<P: AsRef<Path>>(
     options: CreateOptions,
     fsync: bool,
 ) -> Result<(), Error> {
-    let (fd, tmp_path) = make_tmp_file(&path, options)?;
-
-    let mut file = unsafe { File::from_raw_fd(fd.into_raw_fd()) };
+    let (mut file, tmp_path) = make_tmp_file(&path, options)?;
 
     if let Err(err) = file.write_all(data) {
         let _ = unistd::unlink(&tmp_path);
