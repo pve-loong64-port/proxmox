@@ -106,8 +106,13 @@ pub trait CommaSeparatedListSchema: ApiType {
 /// The inner type `T` must implement [`CommaSeparatedListSchema`] so that element-level API schema
 /// is available for the API definitions and so that validation is applied during deserialization.
 ///
-/// Element values **must not** contain commas themselves - the format does not support quoting or
-/// escaping.
+/// Besides [`Serialize`]/[`Deserialize`], the list can be encoded and parsed as a plain string via
+/// [`to_property_string`](Self::to_property_string) and [`FromStr`](std::str::FromStr). Parsing
+/// validates each element against the element schema; encoding does not, so the two are not a
+/// guaranteed round trip for in-memory values that bypassed validation.
+///
+/// Element values **must not** contain commas, semicolons, or whitespace - those are all treated as
+/// separators when parsing, and the format does not support quoting or escaping.
 ///
 /// See the [module-level documentation](self) for usage examples and details.
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -141,6 +146,39 @@ impl<'de, T: CommaSeparatedListSchema + Deserialize<'de>> Deserialize<'de>
     {
         let vec: Vec<T> = deserialize(deserializer, &T::ARRAY_SCHEMA)?;
         Ok(CommaSeparatedList(vec))
+    }
+}
+
+impl<T: CommaSeparatedListSchema + Serialize> CommaSeparatedList<T> {
+    /// Encode the list as a comma-separated property string.
+    ///
+    /// Elements are joined with a single comma and written exactly as the schema serializer
+    /// produces them, **without** re-validating them against the element schema - so this can emit
+    /// a string that [`FromStr`](std::str::FromStr) would later reject (for example an out-of-range
+    /// value).
+    pub fn to_property_string(&self) -> Result<String, crate::de::Error> {
+        self.0.serialize(crate::ser::PropertyStringSerializer::new(
+            String::new(),
+            &T::ARRAY_SCHEMA,
+        ))
+    }
+}
+
+impl<T> std::str::FromStr for CommaSeparatedList<T>
+where
+    T: CommaSeparatedListSchema + for<'de> Deserialize<'de>,
+{
+    type Err = crate::de::Error;
+
+    /// Parse a comma-separated list, validating every element against the element schema.
+    ///
+    /// The accepted grammar is wider than what [`to_property_string`](Self::to_property_string)
+    /// emits: entries may be separated by a comma, a semicolon, or ASCII whitespace, and if a NUL
+    /// byte appears anywhere it becomes the only separator. Empty entries are skipped and the empty
+    /// string yields an empty list. Quoting and escaping are not honored, so element values must
+    /// not contain separator characters.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Vec::<T>::deserialize(crate::de::SchemaDeserializer::new(s, &T::ARRAY_SCHEMA)).map(Self)
     }
 }
 
@@ -334,5 +372,24 @@ mod tests {
             "deserializing a value exceeding maximum should fail, got: {:?}",
             result.unwrap()
         );
+    }
+
+    #[test]
+    fn test_from_str_and_to_property_string() {
+        let list: CommaSeparatedList<TestNum> = "1,2,3".parse().unwrap();
+        assert_eq!(list.0, vec![TestNum(1), TestNum(2), TestNum(3)]);
+        assert_eq!(list.to_property_string().unwrap(), "1,2,3");
+
+        // empty string round-trips to the empty list
+        let empty: CommaSeparatedList<TestNum> = "".parse().unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.to_property_string().unwrap(), "");
+
+        // the parse grammar is wider than the encoder output
+        let mixed: CommaSeparatedList<TestNum> = "1;2 3".parse().unwrap();
+        assert_eq!(mixed.0, vec![TestNum(1), TestNum(2), TestNum(3)]);
+
+        // parsing validates each element (4 exceeds maximum 3)
+        "1,4".parse::<CommaSeparatedList<TestNum>>().unwrap_err();
     }
 }
