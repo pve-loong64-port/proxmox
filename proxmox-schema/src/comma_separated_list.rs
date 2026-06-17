@@ -115,9 +115,16 @@ pub trait CommaSeparatedListSchema: ApiType {
 /// separators when parsing, and the format does not support quoting or escaping.
 ///
 /// See the [module-level documentation](self) for usage examples and details.
-#[derive(Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
 pub struct CommaSeparatedList<T>(pub Vec<T>);
+
+// Derived `Default` would add a spurious `T: Default` bound; an empty list needs none.
+impl<T> Default for CommaSeparatedList<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
 
 impl<T> ApiType for CommaSeparatedList<T>
 where
