@@ -180,6 +180,7 @@ pub fn replace_file<P: AsRef<Path>>(
     let (mut file, tmp_path) = make_tmp_file(&path, options)?;
 
     if let Err(err) = file.write_all(data) {
+        drop(file);
         let _ = unistd::unlink(&tmp_path);
         bail!("write failed: {}", err);
     }
@@ -187,10 +188,15 @@ pub fn replace_file<P: AsRef<Path>>(
     if fsync {
         // make sure data is on disk
         if let Err(err) = nix::unistd::fsync(file.as_raw_fd()) {
+            drop(file);
             let _ = unistd::unlink(&tmp_path);
             bail!("fsync failed: {}", err);
         }
     }
+
+    // Allow WORM file systems to commit the contents before the rename
+    // and prevent temporary .fuse_hidden* files created by unlink.
+    drop(file);
 
     if let Err(err) = std::fs::rename(&tmp_path, &path) {
         let _ = unistd::unlink(&tmp_path);
