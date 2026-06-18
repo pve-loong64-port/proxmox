@@ -9,8 +9,11 @@ use std::{
 };
 
 use anyhow::{Context, Error, bail, format_err};
-use ldap3::adapters::{Adapter, EntriesOnly, PagedResults};
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, LdapResult, Scope, SearchEntry};
+use ldap3::{
+    adapters::{Adapter, EntriesOnly, PagedResults},
+    ldap_escape,
+};
 use native_tls::{Certificate, TlsConnector, TlsConnectorBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -342,7 +345,7 @@ impl Connection {
     }
 
     async fn do_search_user_dn(&self, username: &str, ldap: &mut Ldap) -> Result<String, Error> {
-        let query = format!("(&({}={}))", self.config.user_attr, username);
+        let query = format!("(&({}={}))", self.config.user_attr, ldap_escape(username));
 
         let (entries, _res) = ldap
             .search(&self.config.base_dn, Scope::Subtree, &query, &["dn"])
