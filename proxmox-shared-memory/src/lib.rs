@@ -45,14 +45,21 @@ pub trait Init: Sized {
 /// processes. You should only use atomic types from 'std::sync::atomic', or
 /// protect the data with [SharedMutex].
 ///
-/// SizeOf(T) needs to be a multiple of 4096 (the page size).
+/// SizeOf(T) needs to be a multiple of 4096 or 16384 (the page size).
 pub struct SharedMemory<T> {
     mmap: Mmap<T>,
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 const fn up_to_page_size(n: usize) -> usize {
     // FIXME: use sysconf(_SC_PAGE_SIZE)
     (n + 4095) & !4095
+}
+
+#[cfg(target_arch = "loongarch64")]
+const fn up_to_page_size(n: usize) -> usize {
+    // FIXME: use sysconf(_SC_PAGE_SIZE)
+    (n + 16383) & !16383
 }
 
 fn mmap_file<T: Init>(file: &mut File, initialize: bool) -> Result<Mmap<T>, Error> {
@@ -104,7 +111,7 @@ impl<T: Sized + Init> SharedMemory<T> {
 
         if size != up_size {
             bail!(
-                "SharedMemory::open {:?} failed - data size {} is not a multiple of 4096",
+                "SharedMemory::open {:?} failed - data size {} is not a multiple of 4096 or 16384",
                 path,
                 size
             );
