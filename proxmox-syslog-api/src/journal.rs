@@ -112,6 +112,11 @@ pub fn dump_journal(filter: JournalFilter) -> Result<Vec<String>, Error> {
         args.push(endcursor.to_string());
     }
 
+    if let Some(priority) = &filter.priority {
+        args.push(String::from("-p"));
+        args.push(priority.to_string());
+    }
+
     let mut lines: Vec<String> = vec![];
 
     let mut child = Command::new("mini-journalreader")
