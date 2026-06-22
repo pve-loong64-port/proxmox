@@ -146,3 +146,67 @@ pub fn dump_journal(filter: JournalFilter) -> Result<Vec<String>, Error> {
 
     Ok(lines)
 }
+
+/// Build the `mini-journalreader` arguments for the given journal filter.
+///
+/// Selects `-J` (structured records) or `-j` (plain lines); both already emit the
+/// `{"data":[...],"success":1}` API envelope, so a caller can run the reader and stream its stdout
+/// straight through as the response body instead of collecting and re-encoding it.
+///
+/// The structured output and the priority, unit, identifier and kernel filters need
+/// proxmox-mini-journalreader >= 1.7, which introduced the corresponding reader flags.
+pub fn journal_args(filter: &JournalFilter) -> Vec<String> {
+    let mut args = vec![if filter.structured { "-J" } else { "-j" }.to_string()];
+
+    if let Some(lastentries) = filter.lastentries {
+        args.push("-n".to_string());
+        args.push(lastentries.to_string());
+    }
+    if let Some(since) = filter.since {
+        args.push("-b".to_string());
+        args.push(since.to_string());
+    }
+    if let Some(until) = filter.until {
+        args.push("-e".to_string());
+        args.push(until.to_string());
+    }
+    if let Some(startcursor) = &filter.startcursor {
+        args.push("-f".to_string());
+        args.push(startcursor.clone());
+    }
+    if let Some(endcursor) = &filter.endcursor {
+        args.push("-t".to_string());
+        args.push(endcursor.clone());
+    }
+    if let Some(priority) = &filter.priority {
+        if !priority.is_empty() {
+            args.push("-p".to_string());
+            args.push(priority.clone());
+        }
+    }
+    if let Some(service) = &filter.service {
+        args.push("-i".to_string());
+        args.push(service.clone());
+    }
+    if let Some(unit) = &filter.unit {
+        // a few service names differ from the unit that actually logs
+        let unit = match unit.as_str() {
+            "postfix" => "postfix@-",
+            "sshd" => "ssh",
+            other => other,
+        };
+        args.push("-u".to_string());
+        args.push(unit.to_string());
+    }
+    if filter.kernel {
+        args.push("-k".to_string());
+    }
+    if filter.structured && filter.identifiers {
+        args.push("-I".to_string());
+    }
+    if filter.structured && filter.units {
+        args.push("-U".to_string());
+    }
+
+    args
+}

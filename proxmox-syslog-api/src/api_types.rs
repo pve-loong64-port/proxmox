@@ -8,10 +8,11 @@ use proxmox_schema::{ApiStringFormat, api};
 // with a verify function rather than a regex to avoid pulling the regex crate into this small crate
 fn verify_journal_priority(value: &str) -> Result<(), Error> {
     let is_level = |p: &str| p.len() == 1 && matches!(p.as_bytes()[0], b'0'..=b'7');
-    let valid = match value.split_once("..") {
-        Some((low, high)) => is_level(low) && is_level(high),
-        None => is_level(value),
-    };
+    let valid = value.is_empty()
+        || match value.split_once("..") {
+            Some((low, high)) => is_level(low) && is_level(high),
+            None => is_level(value),
+        };
     if !valid {
         bail!("'{value}' is not a valid syslog priority, expected 0-7 or LOW..HIGH");
     }
@@ -110,7 +111,41 @@ pub struct SyslogLine {
             format: &JOURNAL_PRIORITY_FORMAT,
             description: "Only print messages of this syslog priority: a single \
                 level from 0 (emerg) to 7 (debug), selecting that level and \
-                everything more severe, or a 'LOW..HIGH' range.",
+                everything more severe, or a 'LOW..HIGH' range. Empty means no filter.",
+        },
+        structured: {
+            type: Boolean,
+            optional: true,
+            default: false,
+            description: "Emit structured JSON with separate entry fields instead of plain text.",
+        },
+        service: {
+            type: String,
+            optional: true,
+            description: "Only print messages whose syslog identifier matches this glob.",
+        },
+        unit: {
+            type: String,
+            optional: true,
+            description: "Only print messages of this systemd unit (the .service suffix is implied).",
+        },
+        kernel: {
+            type: Boolean,
+            optional: true,
+            default: false,
+            description: "Only print kernel messages.",
+        },
+        identifiers: {
+            type: Boolean,
+            optional: true,
+            default: false,
+            description: "Also list the distinct syslog identifiers present. Requires 'structured'.",
+        },
+        units: {
+            type: Boolean,
+            optional: true,
+            default: false,
+            description: "Also list the distinct systemd units present. Requires 'structured'.",
         },
     }
 )]
@@ -123,4 +158,14 @@ pub struct JournalFilter {
     pub startcursor: Option<String>,
     pub endcursor: Option<String>,
     pub priority: Option<String>,
+    #[serde(default)]
+    pub structured: bool,
+    pub service: Option<String>,
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub kernel: bool,
+    #[serde(default)]
+    pub identifiers: bool,
+    #[serde(default)]
+    pub units: bool,
 }
