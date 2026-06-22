@@ -20,7 +20,10 @@ use proxmox_sys::fs::CreateOptions;
 
 use crate::api_types::RequestCounterThresholds;
 
+#[cfg(not(target_arch = "loongarch64"))]
 const MEMORY_PAGE_SIZE: usize = 4096;
+#[cfg(target_arch = "loongarch64")]
+const MEMORY_PAGE_SIZE: usize = 16384;
 /// Generated via openssl::sha::sha256(b"Proxmox shared request counters v1.0")[0..8]
 const PROXMOX_SHARED_REQUEST_COUNTERS_1_0: [u8; 8] = [224, 110, 88, 252, 26, 77, 180, 5];
 
@@ -189,8 +192,8 @@ impl RequestCounters {
     }
 }
 
-/// Size of the padding to align the mmapped request counters to 4k default
-/// page size.
+/// Size of the padding to align the mmapped request counters to 4k or 16k
+/// default page size.
 const PADDING_SIZE: usize =
     MEMORY_PAGE_SIZE - std::mem::size_of::<AlignedMagic>() - std::mem::size_of::<RequestCounters>();
 
