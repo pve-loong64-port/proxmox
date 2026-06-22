@@ -28,9 +28,16 @@ impl Init for TestData {
     }
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 struct SingleMutexData {
     data: SharedMutex<TestData>,
     _padding: [u8; 4096 - 64 - 8],
+}
+
+#[cfg(target_arch = "loongarch64")]
+struct SingleMutexData {
+    data: SharedMutex<TestData>,
+    _padding: [u8; 16384 - 64 - 8],
 }
 
 impl Init for SingleMutexData {
@@ -51,11 +58,22 @@ impl Init for SingleMutexData {
 
 #[derive(Debug)]
 #[repr(C)]
+#[cfg(not(target_arch = "loongarch64"))]
 struct MultiMutexData {
     acount: AtomicU64,
     block1: SharedMutex<TestData>,
     block2: SharedMutex<TestData>,
     padding: [u8; 4096 - 136 - 16],
+}
+
+#[derive(Debug)]
+#[repr(C)]
+#[cfg(target_arch = "loongarch64")]
+struct MultiMutexData {
+    acount: AtomicU64,
+    block1: SharedMutex<TestData>,
+    block2: SharedMutex<TestData>,
+    padding: [u8; 16384 - 136 - 16],
 }
 
 impl Init for MultiMutexData {
