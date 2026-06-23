@@ -1,3 +1,16 @@
+rust-proxmox-syslog-api (1.1.0-1) trixie; urgency=medium
+
+  * add filter parameters for syslog priority, systemd unit, syslog identifier
+    glob and kernel-only messages
+
+  * support structured JSON output, with separate timestamp, identifier, PID,
+    message and priority fields per entry
+
+  * add a journal_args() helper to build the reader arguments for streaming
+    its output directly, and deprecate dump_journal()
+
+ -- Proxmox Support Team <support@proxmox.com>  Sun, 28 Jun 2026 18:54:51 +0200
+
 rust-proxmox-syslog-api (1.0.1-1) trixie; urgency=medium
 
   * update proxmox-schema to 5.0.0
