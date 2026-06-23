@@ -84,6 +84,7 @@ pub fn dump_syslog(filter: SyslogFilter) -> Result<(u64, Vec<SyslogLine>), Error
 ///
 /// The journal api uses `mini-journalreader' binary to get the log entries.
 /// The cursor based api allows to implement live view efficiently.
+#[deprecated(note = "superseded by journal_args(); stream the reader's -j/-J output directly")]
 pub fn dump_journal(filter: JournalFilter) -> Result<Vec<String>, Error> {
     let mut args = vec![];
 
