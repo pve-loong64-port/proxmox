@@ -1,3 +1,10 @@
+rust-pve-api-types (8.1.12-1) trixie; urgency=medium
+
+  * expose additional API endpoints: The termproxy and vncproxy calls for
+    guests.
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 25 Jun 2026 10:46:53 +0200
+
 rust-pve-api-types (8.1.11-1) trixie; urgency=medium
 
   * fix deserializing 'GET /cluster/options' for the fields pve-cluster
