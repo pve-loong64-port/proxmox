@@ -421,13 +421,18 @@ mod templates {
             }
 
             let path: PathBuf = path.into();
-            let metadata = metadata(&path)?;
+            let metadata = metadata(&path).map_err(|err| {
+                format_err!("failed to load template '{name}' from {path:?} - {err}")
+            })?;
             let mtime = metadata.modified()?;
 
             self.templates
                 .write()
                 .unwrap()
-                .register_template_file(name, &path)?;
+                .register_template_file(name, &path)
+                .map_err(|err| {
+                    format_err!("failed to register template '{name}' from {path:?} - {err}")
+                })?;
             self.template_files
                 .write()
                 .unwrap()
