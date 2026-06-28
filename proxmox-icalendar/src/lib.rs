@@ -201,6 +201,30 @@ impl EventStatus {
     }
 }
 
+/// A `VEVENT` `ORGANIZER` (RFC 5545 3.8.4.3): the calendar user responsible for the event. Carries
+/// a display `CN` and, when known, a `mailto:` address; without an address the value falls back to
+/// the non-routable `invalid:nomail` URI so the property stays spec-valid.
+#[derive(Debug, Clone)]
+struct Organizer {
+    cn: String,
+    email: Option<String>,
+}
+
+/// Format a property-parameter value (RFC 5545 3.1/3.2): wrap it in `DQUOTE` when it carries a
+/// COLON, SEMICOLON, or COMMA, which otherwise delimit the parameter list. A quoted string cannot
+/// itself contain a `DQUOTE`, and a raw CR or LF would break line framing, so all three are dropped.
+fn format_param_value(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .filter(|c| *c != '"' && *c != '\r' && *c != '\n')
+        .collect();
+    if sanitized.contains([':', ';', ',']) {
+        format!("\"{sanitized}\"")
+    } else {
+        sanitized
+    }
+}
+
 /// `TRANSP` value (RFC 5545 3.8.2.7): whether the event consumes the subscriber's free/busy time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Transp {
@@ -285,6 +309,7 @@ pub struct Event {
     description: Option<String>,
     status: Option<EventStatus>,
     transp: Transp,
+    organizer: Option<Organizer>,
     dtstamp: Option<i64>,
     last_modified: Option<i64>,
 }
@@ -304,6 +329,7 @@ impl Event {
             description: None,
             status: None,
             transp: Transp::Opaque,
+            organizer: None,
             dtstamp: None,
             last_modified: None,
         }
@@ -363,6 +389,17 @@ impl Event {
     /// time; `Opaque` is the default and is omitted.
     pub fn with_transp(mut self, transp: Transp) -> Self {
         self.transp = transp;
+        self
+    }
+
+    /// Set the `ORGANIZER` (RFC 5545 3.8.4.3). `cn` is the display name; `email`, when given, is
+    /// emitted as the `mailto:` calendar address, otherwise the value falls back to a non-routable
+    /// `invalid:nomail` URI.
+    pub fn with_organizer(mut self, cn: impl Into<String>, email: Option<String>) -> Self {
+        self.organizer = Some(Organizer {
+            cn: cn.into(),
+            email,
+        });
         self
     }
 
@@ -470,6 +507,16 @@ impl Calendar {
         }
         if let Some(status) = ev.status {
             write_content_line(out, &format!("STATUS:{}", status.as_ics()))?;
+        }
+        if let Some(org) = &ev.organizer {
+            let addr = match &org.email {
+                Some(mail) => format!("mailto:{mail}"),
+                None => "invalid:nomail".to_string(),
+            };
+            write_content_line(
+                out,
+                &format!("ORGANIZER;CN={}:{}", format_param_value(&org.cn), addr),
+            )?;
         }
         if ev.transp == Transp::Transparent {
             write_content_line(out, "TRANSP:TRANSPARENT")?;
@@ -811,6 +858,28 @@ mod tests {
         assert!(ics.contains("\r\nNAME:Test\r\n"));
         assert!(ics.contains("X-WR-CALDESC:A test calendar"));
         assert!(ics.contains("DESCRIPTION:A test calendar"));
+    }
+
+    #[test]
+    fn organizer_emits_cn_and_mailto_or_falls_back() {
+        // With an address the ORGANIZER carries CN plus mailto; without one it falls back to the
+        // non-routable invalid:nomail value rather than an empty CAL-ADDRESS.
+        let with_mail = sample_event().with_organizer("Tina Lead", Some("tlead@example.com".into()));
+        let ics = sample_calendar(vec![with_mail]).to_string();
+        assert!(ics.contains("ORGANIZER;CN=Tina Lead:mailto:tlead@example.com"));
+
+        let no_mail = sample_event().with_organizer("Tina Lead", None);
+        let ics = sample_calendar(vec![no_mail]).to_string();
+        assert!(ics.contains("ORGANIZER;CN=Tina Lead:invalid:nomail"));
+
+        // A CN with a separator char is double-quoted so it cannot break the parameter list.
+        let comma = sample_event().with_organizer("Lead, Tina", Some("t@example.com".into()));
+        let ics = sample_calendar(vec![comma]).to_string();
+        assert!(ics.contains("ORGANIZER;CN=\"Lead, Tina\":mailto:t@example.com"));
+
+        // Omitted by default.
+        let plain = sample_calendar(vec![sample_event()]).to_string();
+        assert!(!plain.contains("ORGANIZER"));
     }
 
     #[test]
