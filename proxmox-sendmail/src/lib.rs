@@ -247,6 +247,9 @@ pub struct Mail<'a> {
     attachments: Vec<Attachment<'a>>,
     mask_participants: bool,
     noreply: Option<Recipient>,
+    /// Extra header lines, emitted in insertion order. Stored raw; encoded and sanitized at format
+    /// time like the other headers.
+    headers: Vec<(String, String)>,
 }
 
 impl<'a> Mail<'a> {
@@ -265,6 +268,7 @@ impl<'a> Mail<'a> {
             attachments: Vec::new(),
             mask_participants: true,
             noreply: None,
+            headers: Vec::new(),
         }
     }
 
@@ -390,6 +394,21 @@ impl<'a> Mail<'a> {
     /// <noreply>` by default.
     pub fn with_masked_receiver(mut self, name: &str, email: &str) -> Self {
         self.set_masked_mail_and_name(name, email);
+        self
+    }
+
+    /// Adds a custom header line to the mail, such as `X-Custom: value`.
+    ///
+    /// The value is RFC 2047-encoded when it contains non-ASCII characters, and CR/LF are stripped
+    /// from the key and value to prevent header injection. Headers are emitted in the order added;
+    /// the same key added twice yields two header lines.
+    pub fn add_header(&mut self, key: &str, value: &str) {
+        self.headers.push((key.to_string(), value.to_string()));
+    }
+
+    /// Builder-style method to add a custom header line to the mail. See [`Mail::add_header`].
+    pub fn with_header(mut self, key: &str, value: &str) -> Self {
+        self.add_header(key, value);
         self
     }
 
@@ -586,6 +605,21 @@ impl<'a> Mail<'a> {
         writeln!(header, "Date: {rfc2822_date}")?;
         header.push_str("Auto-Submitted: auto-generated;\n");
 
+        for (key, value) in &self.headers {
+            // Strip CR/LF so an interpolated key or value cannot inject extra header lines.
+            let key = key.replace(['\r', '\n'], "");
+            let value = value.replace(['\r', '\n'], "");
+            if value.is_ascii() {
+                writeln!(header, "{key}: {value}")?;
+            } else {
+                writeln!(
+                    header,
+                    "{key}: =?utf-8?B?{}?=",
+                    proxmox_base64::encode(&value)
+                )?;
+            }
+        }
+
         Ok(header)
     }
 
@@ -706,6 +740,41 @@ Content-Transfer-Encoding: 7bit
 
 This is just ascii text.
 Nothing too special."#,
+        )
+    }
+
+    #[test]
+    fn custom_headers_are_emitted_and_encoded() {
+        let mail = Mail::new(
+            "Sender Name",
+            "mailfrom@example.com",
+            "Subject Line",
+            "Body.",
+        )
+        .with_recipient_and_name("Receiver Name", "receiver@example.com")
+        .with_header("X-Custom", "routing-value")
+        // a non-ASCII value is RFC 2047-encoded
+        .with_header("X-Name", "Müller")
+        // CR/LF in a key or value is stripped, so it cannot inject a second header line
+        .with_header("X-Evil\r\nInjected: yes", "a\r\nb");
+
+        let body = mail.format_mail(0).expect("could not format mail");
+
+        assert_lines_equal_ignore_date(
+            &body,
+            r#"Subject: Subject Line
+From: Sender Name <mailfrom@example.com>
+To: Receiver Name <receiver@example.com>
+Date: Thu, 01 Jan 1970 01:00:00 +0100
+Auto-Submitted: auto-generated;
+X-Custom: routing-value
+X-Name: =?utf-8?B?TcO8bGxlcg==?=
+X-EvilInjected: yes: ab
+Content-Type: text/plain;
+	charset="UTF-8"
+Content-Transfer-Encoding: 7bit
+
+Body."#,
         )
     }
 
