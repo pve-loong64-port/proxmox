@@ -1,3 +1,10 @@
+rust-proxmox-icalendar (0.1.1-1) trixie; urgency=medium
+
+  * add an ORGANIZER property to events, with a CN and an optional mailto
+    address (RFC 5545 3.8.4.3)
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 29 Jun 2026 02:18:59 +0200
+
 rust-proxmox-icalendar (0.1.0-1) trixie; urgency=medium
 
   * Initial release.
