@@ -1,3 +1,11 @@
+rust-proxmox-section-config (3.2.0-1) trixie; urgency=medium
+
+  * canonicalize deprecated property aliases when parsing a section, so a
+    configuration using a renamed property's old name is accepted and mapped
+    to the canonical name before the required-property check.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 01 Jul 2026 18:42:39 +0200
+
 rust-proxmox-section-config (3.1.1-1) trixie; urgency=medium
 
   * rebuild with proxmox-schema 5.0.0
