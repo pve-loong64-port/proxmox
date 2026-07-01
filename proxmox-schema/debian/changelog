@@ -1,3 +1,13 @@
+rust-proxmox-schema (5.3.0-1) trixie; urgency=medium
+
+  * add support for declaring deprecated property aliases on object schemas,
+    so a renamed property keeps accepting its old name while the schema and
+    generated documentation advertise only the new one. Aliases are honored
+    by the CLI, property-string and query/form parsing, and can be rewritten
+    to the canonical name for JSON request bodies.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 01 Jul 2026 18:42:39 +0200
+
 rust-proxmox-schema (5.2.0-1) trixie; urgency=medium
 
   * implement `UpdaterType` for `HashMap` and `BTreeMap`, so map-typed fields
