@@ -1,3 +1,12 @@
+rust-proxmox-api-macro (1.6.0-1) trixie; urgency=medium
+
+  * support a per-property `alias` in `#[api]` to keep a deprecated property
+    name accepted after a rename; a matching `#[serde(alias)]` is emitted on
+    the canonical struct field, so direct serde deserialization accepts the
+    old name too.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 01 Jul 2026 18:42:39 +0200
+
 rust-proxmox-api-macro (1.5.0-1) trixie; urgency=medium
 
   * forward `#[cfg(...)]` attributes from enum variants, section-config enum
