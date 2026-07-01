@@ -123,8 +123,8 @@ const_regex! {
     /// specified in the RFC.
     pub GENERIC_URI_REGEX = r#"^[^\x00-\x1F\x7F <>#"]*$"#;
 
-    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+))$";
-    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?))$";
+    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+)|(?:mmcblk\d+))$";
+    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?)|(?:mmcblk\d+(p\d+)?))$";
 
     /// Regex to match a base64-encoded ED25519 key.
     /// A ED25519 key has always 32 bytes of raw key material, base64 needs 4 * (n / 3) characters
@@ -311,12 +311,12 @@ fn test_regexes() {
 
 #[test]
 fn test_blockdevice_name_regexes() {
-    for name in ["sda", "sdaa", "hdb", "vdc", "xvda", "nvme0n1", "nvme10n12"] {
+    for name in ["sda", "sdaa", "hdb", "vdc", "xvda", "nvme0n1", "nvme10n12", "mmcblk0"] {
         assert!(BLOCKDEVICE_NAME_REGEX.is_match(name), "{name:?}");
         assert!(BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX.is_match(name), "{name:?}");
     }
 
-    for name in ["sda1", "xvda12", "nvme0n1p1"] {
+    for name in ["sda1", "xvda12", "nvme0n1p1", "mmcblk0p1"] {
         assert!(!BLOCKDEVICE_NAME_REGEX.is_match(name), "{name:?}");
         assert!(BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX.is_match(name), "{name:?}");
     }
