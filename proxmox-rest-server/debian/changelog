@@ -1,3 +1,11 @@
+rust-proxmox-rest-server (1.1.0-1) trixie; urgency=medium
+
+  * accept deprecated property aliases in JSON request bodies by rewriting
+    them to the canonical name before verification and dispatch, like the
+    CLI and query-string handling already do.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 01 Jul 2026 18:42:39 +0200
+
 rust-proxmox-rest-server (1.0.6-1) trixie; urgency=medium
 
   * self-signed fallback cert: fix sign order and error handling. While this
