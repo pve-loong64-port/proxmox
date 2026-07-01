@@ -120,8 +120,8 @@ const_regex! {
     /// specified in the RFC.
     pub GENERIC_URI_REGEX = r#"^[^\x00-\x1F\x7F <>#"]*$"#;
 
-    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+)$";
-    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?)$";
+    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+)|(?:mmcblk\d+)$";
+    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?)|(?:mmcblk\d+(p\d+)?)$";
 
     /// Regex to match a base64-encoded ED25519 key.
     /// A ED25519 key has always 32 bytes of raw key material, base64 needs 4 * (n / 3) characters
