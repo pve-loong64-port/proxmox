@@ -1,3 +1,13 @@
+rust-proxmox-time (2.1.2-1) trixie; urgency=medium
+
+  * time span: add two display helpers next to the existing display_down_to():
+    - display_up_to() caps the coarsest unit shown and folds any larger units
+      into it, so a multi-day span can be shown purely in hours
+    - display_range() bounds both the coarsest and finest unit at once, folding
+      above the upper bound and truncating below the lower one
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 02 Jul 2026 12:21:14 +0200
+
 rust-proxmox-time (2.1.1-1) trixie; urgency=medium
 
   * improve time span and add new interfaces:
