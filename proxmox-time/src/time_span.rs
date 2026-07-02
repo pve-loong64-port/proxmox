@@ -77,28 +77,22 @@
 //! assert_eq!(format!("{ts:.9}"), "1s 500ms 200µs 3ns"); // all sub-second units
 //! ```
 //!
-//! ## Truncating at coarser units
+//! ## Bounding which units are shown
 //!
-//! [`TimeSpan::display_down_to`] returns a wrapper that shows discrete integer units down to a
-//! chosen [`TimeUnit`], omitting everything finer:
+//! Three wrappers render discrete integer units, each with its own suffix and with zero-valued
+//! components omitted, but bound the range of units differently:
 //!
-//! ```
-//! # use proxmox_time::{TimeSpan, TimeUnit};
-//! let ts: TimeSpan = "1h 30m 45s".parse().unwrap();
-//! assert_eq!(ts.display_down_to(TimeUnit::Minutes).to_string(), "1h 30m");
-//! assert_eq!(ts.display_down_to(TimeUnit::Seconds).to_string(), "1h 30m 45s");
-//! ```
-//!
-//! ## Capping at coarser units
-//!
-//! [`TimeSpan::display_up_to`] is the counterpart: it caps the coarsest unit shown at a chosen
-//! [`TimeUnit`], folding any coarser magnitude into it so no information is lost:
+//! - [`TimeSpan::display_down_to`] sets the finest unit and drops anything finer.
+//! - [`TimeSpan::display_up_to`] sets the coarsest unit and folds anything coarser into it, so no
+//!   magnitude is lost.
+//! - [`TimeSpan::display_range`] combines the two, bounding the coarsest and finest unit at once.
 //!
 //! ```
 //! # use proxmox_time::{TimeSpan, TimeUnit};
-//! let ts: TimeSpan = "1h 30m 45s".parse().unwrap();
-//! assert_eq!(ts.display_up_to(TimeUnit::Minutes).to_string(), "90m 45s");
-//! assert_eq!(ts.display_up_to(TimeUnit::Seconds).to_string(), "5445s");
+//! let ts: TimeSpan = "1d 2h 30m 45s".parse().unwrap();
+//! assert_eq!(ts.display_down_to(TimeUnit::Hours).to_string(), "1d 2h");
+//! assert_eq!(ts.display_up_to(TimeUnit::Hours).to_string(), "26h 30m 45s");
+//! assert_eq!(ts.display_range(TimeUnit::Hours, TimeUnit::Minutes).to_string(), "26h 30m");
 //! ```
 //!
 //! # Parsing
@@ -478,6 +472,36 @@ impl TimeSpan {
         DisplayUpTo { ts: self, largest }
     }
 
+    /// Returns a [`Display`](std::fmt::Display) wrapper that formats with discrete integer units
+    /// bounded to an inclusive range: magnitude in units coarser than `largest` is folded into it,
+    /// and anything finer than `smallest` is truncated. Zero-valued components in between are
+    /// omitted.
+    ///
+    /// This is the general form of [`display_up_to`](Self::display_up_to) (which leaves the finest
+    /// unit unbounded) and [`display_down_to`](Self::display_down_to) (which leaves the coarsest
+    /// unit unbounded). The two bounds are order-independent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use proxmox_time::{TimeSpan, TimeUnit};
+    /// let ts: TimeSpan = "1d 2h 30m 45s".parse().unwrap();
+    /// assert_eq!(ts.display_range(TimeUnit::Hours, TimeUnit::Minutes).to_string(), "26h 30m");
+    /// assert_eq!(ts.display_range(TimeUnit::Days, TimeUnit::Hours).to_string(), "1d 2h");
+    /// ```
+    pub fn display_range(self, largest: TimeUnit, smallest: TimeUnit) -> DisplayRange {
+        let (largest, smallest) = if largest.ordinal() <= smallest.ordinal() {
+            (largest, smallest)
+        } else {
+            (smallest, largest)
+        };
+        DisplayRange {
+            ts: self,
+            largest,
+            smallest,
+        }
+    }
+
     /// Return a display wrapper that shows `count` contiguous units starting from the largest
     /// non-zero one, filling gaps with zeros for readability.
     ///
@@ -534,6 +558,49 @@ impl std::fmt::Display for DisplayTopUnits {
     }
 }
 
+/// Renders discrete integer units for the ordinal window `[top, bottom]` (coarsest to finest),
+/// folding all coarser magnitude into the first unit and truncating anything finer, omitting zero
+/// components. `zero_unit` is only used when every unit in the window is zero.
+///
+/// Works in whole nanoseconds using `u128` so the folded top unit cannot overflow. The remainder
+/// starts at the full duration and is divided by the top unit first, so that unit absorbs all
+/// coarser magnitude; the finer units then decompose the leftover.
+fn fmt_unit_window(
+    f: &mut std::fmt::Formatter<'_>,
+    ts: TimeSpan,
+    top: u8,
+    bottom: u8,
+    zero_unit: TimeUnit,
+) -> std::fmt::Result {
+    let mut rem = ts.secs as u128 * 1_000_000_000 + ts.nanos as u128;
+    let mut first = true;
+
+    for unit in TimeUnit::ALL {
+        let ord = unit.ordinal();
+        if ord < top {
+            continue;
+        }
+        if ord > bottom {
+            break;
+        }
+        let val = rem / unit.nanos();
+        rem %= unit.nanos();
+        if val > 0 {
+            if !first {
+                write!(f, " ")?;
+            }
+            first = false;
+            write!(f, "{val}{}", unit.suffix())?;
+        }
+    }
+
+    if first {
+        write!(f, "0{}", zero_unit.suffix())?;
+    }
+
+    Ok(())
+}
+
 /// Wrapper for displaying a [`TimeSpan`] with discrete integer units, folding everything coarser
 /// than a specified largest unit into it. Obtained via [`TimeSpan::display_up_to`].
 pub struct DisplayUpTo {
@@ -543,33 +610,28 @@ pub struct DisplayUpTo {
 
 impl std::fmt::Display for DisplayUpTo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Work in whole nanoseconds using u128 so the folded cap unit never overflows. Seeding the
-        // remainder with the full duration and dividing by the cap unit first makes it absorb all
-        // coarser magnitude; finer units then decompose the leftover.
-        let mut rem = self.ts.secs as u128 * 1_000_000_000 + self.ts.nanos as u128;
-        let start = self.largest.ordinal();
-        let mut first = true;
+        let bottom = TimeUnit::Nanoseconds.ordinal();
+        fmt_unit_window(f, self.ts, self.largest.ordinal(), bottom, self.largest)
+    }
+}
 
-        for unit in TimeUnit::ALL {
-            if unit.ordinal() < start {
-                continue;
-            }
-            let val = rem / unit.nanos();
-            rem %= unit.nanos();
-            if val > 0 {
-                if !first {
-                    write!(f, " ")?;
-                }
-                first = false;
-                write!(f, "{val}{}", unit.suffix())?;
-            }
-        }
+/// Wrapper for displaying a [`TimeSpan`] with discrete integer units bounded to an inclusive range
+/// of units. Obtained via [`TimeSpan::display_range`].
+pub struct DisplayRange {
+    ts: TimeSpan,
+    largest: TimeUnit,
+    smallest: TimeUnit,
+}
 
-        if first {
-            write!(f, "0{}", self.largest.suffix())?;
-        }
-
-        Ok(())
+impl std::fmt::Display for DisplayRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt_unit_window(
+            f,
+            self.ts,
+            self.largest.ordinal(),
+            self.smallest.ordinal(),
+            self.smallest,
+        )
     }
 }
 
@@ -1518,5 +1580,56 @@ mod tests {
         // The cap unit is omitted when it is zero but finer units are present.
         let ts = TimeSpan::from_str("90s").unwrap();
         assert_eq!(ts.display_up_to(TimeUnit::Hours).to_string(), "1m 30s");
+    }
+
+    #[test]
+    fn display_range() {
+        // Folds coarser units into `largest` and truncates below `smallest` in one step: the hour
+        // folds into minutes and the 500ms remainder is dropped rather than rounded.
+        let ts = TimeSpan::from(Duration::new(3665, 500_000_000));
+        assert_eq!(
+            ts.display_range(TimeUnit::Minutes, TimeUnit::Seconds)
+                .to_string(),
+            "61m 5s"
+        );
+
+        let ts = TimeSpan::from_str("1d 2h 30m 45s").unwrap();
+
+        // The two bounds are order-independent.
+        assert_eq!(
+            ts.display_range(TimeUnit::Minutes, TimeUnit::Hours)
+                .to_string(),
+            ts.display_range(TimeUnit::Hours, TimeUnit::Minutes)
+                .to_string(),
+        );
+
+        // Equal bounds collapse to a single folded, truncated unit.
+        assert_eq!(
+            ts.display_range(TimeUnit::Hours, TimeUnit::Hours)
+                .to_string(),
+            "26h"
+        );
+
+        // At either extreme it coincides with the one-sided shortcuts, which use a separate code
+        // path, so this doubles as a cross-check between the two implementations.
+        let ts = TimeSpan::from_str("1h 30m 45s").unwrap();
+        assert_eq!(
+            ts.display_range(TimeUnit::Years, TimeUnit::Minutes)
+                .to_string(),
+            ts.display_down_to(TimeUnit::Minutes).to_string(),
+        );
+        assert_eq!(
+            ts.display_range(TimeUnit::Minutes, TimeUnit::Nanoseconds)
+                .to_string(),
+            ts.display_up_to(TimeUnit::Minutes).to_string(),
+        );
+
+        // A zero span shows zero in the smallest unit (display_up_to instead uses the cap unit).
+        assert_eq!(
+            TimeSpan::default()
+                .display_range(TimeUnit::Hours, TimeUnit::Minutes)
+                .to_string(),
+            "0m"
+        );
     }
 }
