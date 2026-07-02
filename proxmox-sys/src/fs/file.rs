@@ -149,7 +149,7 @@ pub fn make_tmp_file<P: AsRef<Path>>(
 
     // use mkstemp here, because it works with different processes, threads, even tokio tasks
     let mut template = path.to_owned();
-    template.set_extension("tmp_XXXXXX");
+    template.add_extension("tmp_XXXXXX");
     let (mut file, tmp_path) = match mkostemp(&template, OFlag::O_CLOEXEC) {
         Ok((fd, path)) => (unsafe { File::from_raw_fd(fd) }, path),
         Err(err) => bail!("mkstemp {:?} failed: {}", template, err),
@@ -465,4 +465,36 @@ pub fn file_get_non_comment_lines<P: AsRef<Path>>(
         }
         Err(err) => Some(Err(err)),
     }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn make_tmp_file_does_not_replace_extension() {
+        let (_, path) = make_tmp_file("/tmp/proxmox-sys-test.json", CreateOptions::new()).unwrap();
+
+        assert!(
+            &path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("proxmox-sys-test.json")
+        );
+
+        let (_, path) = make_tmp_file(
+            "/tmp/proxmox-sys-test.archive.1000.zst",
+            CreateOptions::new(),
+        )
+        .unwrap();
+
+        assert!(
+            &path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("archive.1000.zst")
+        );
+    }
 }
