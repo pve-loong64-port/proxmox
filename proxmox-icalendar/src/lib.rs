@@ -864,7 +864,8 @@ mod tests {
     fn organizer_emits_cn_and_mailto_or_falls_back() {
         // With an address the ORGANIZER carries CN plus mailto; without one it falls back to the
         // non-routable invalid:nomail value rather than an empty CAL-ADDRESS.
-        let with_mail = sample_event().with_organizer("Tina Lead", Some("tlead@example.com".into()));
+        let with_mail =
+            sample_event().with_organizer("Tina Lead", Some("tlead@example.com".into()));
         let ics = sample_calendar(vec![with_mail]).to_string();
         assert!(ics.contains("ORGANIZER;CN=Tina Lead:mailto:tlead@example.com"));
 
