@@ -89,6 +89,18 @@
 //! assert_eq!(ts.display_down_to(TimeUnit::Seconds).to_string(), "1h 30m 45s");
 //! ```
 //!
+//! ## Capping at coarser units
+//!
+//! [`TimeSpan::display_up_to`] is the counterpart: it caps the coarsest unit shown at a chosen
+//! [`TimeUnit`], folding any coarser magnitude into it so no information is lost:
+//!
+//! ```
+//! # use proxmox_time::{TimeSpan, TimeUnit};
+//! let ts: TimeSpan = "1h 30m 45s".parse().unwrap();
+//! assert_eq!(ts.display_up_to(TimeUnit::Minutes).to_string(), "90m 45s");
+//! assert_eq!(ts.display_up_to(TimeUnit::Seconds).to_string(), "5445s");
+//! ```
+//!
 //! # Parsing
 //!
 //! When parsing a time span, all units listed above are accepted. Spaces between numeric values and
@@ -235,6 +247,38 @@ impl TimeUnit {
             TimeUnit::Nanoseconds => 9,
         }
     }
+
+    /// Number of nanoseconds in one of this unit, as `u128` so the folded value of an arbitrarily
+    /// large span never overflows.
+    fn nanos(self) -> u128 {
+        const NS_PER_SEC: u128 = 1_000_000_000;
+        match self {
+            TimeUnit::Years => SECS_PER_YEAR as u128 * NS_PER_SEC,
+            TimeUnit::Months => SECS_PER_MONTH as u128 * NS_PER_SEC,
+            TimeUnit::Weeks => SECS_PER_WEEK as u128 * NS_PER_SEC,
+            TimeUnit::Days => SECS_PER_DAY as u128 * NS_PER_SEC,
+            TimeUnit::Hours => SECS_PER_HOUR as u128 * NS_PER_SEC,
+            TimeUnit::Minutes => SECS_PER_MINUTE as u128 * NS_PER_SEC,
+            TimeUnit::Seconds => NS_PER_SEC,
+            TimeUnit::Milliseconds => 1_000_000,
+            TimeUnit::Microseconds => 1_000,
+            TimeUnit::Nanoseconds => 1,
+        }
+    }
+
+    /// All units ordered from coarsest to finest.
+    const ALL: [TimeUnit; 10] = [
+        TimeUnit::Years,
+        TimeUnit::Months,
+        TimeUnit::Weeks,
+        TimeUnit::Days,
+        TimeUnit::Hours,
+        TimeUnit::Minutes,
+        TimeUnit::Seconds,
+        TimeUnit::Milliseconds,
+        TimeUnit::Microseconds,
+        TimeUnit::Nanoseconds,
+    ];
 }
 
 /// A decomposed view of a time span with separate fields for each unit.
@@ -410,6 +454,30 @@ impl TimeSpan {
         DisplayTimeSpan { ts: self, smallest }
     }
 
+    /// Returns a [`Display`](std::fmt::Display) wrapper that formats with discrete integer units,
+    /// capping the coarsest unit shown at `largest`. Any magnitude in units coarser than `largest`
+    /// is folded into it, so no information is lost. Zero-valued components are omitted.
+    ///
+    /// This is the counterpart to [`display_down_to`](Self::display_down_to), which bounds the
+    /// finest unit instead of the coarsest. A `largest` coarser than every unit the span contains
+    /// leaves the output unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use proxmox_time::{TimeSpan, TimeUnit};
+    /// let ts: TimeSpan = "2d 3h 30m".parse().unwrap();
+    /// assert_eq!(ts.display_up_to(TimeUnit::Hours).to_string(), "51h 30m");
+    /// assert_eq!(ts.display_up_to(TimeUnit::Minutes).to_string(), "3090m");
+    ///
+    /// // A cap coarser than the largest present unit changes nothing.
+    /// let ts: TimeSpan = "1h 30m 45s".parse().unwrap();
+    /// assert_eq!(ts.display_up_to(TimeUnit::Years).to_string(), "1h 30m 45s");
+    /// ```
+    pub fn display_up_to(self, largest: TimeUnit) -> DisplayUpTo {
+        DisplayUpTo { ts: self, largest }
+    }
+
     /// Return a display wrapper that shows `count` contiguous units starting from the largest
     /// non-zero one, filling gaps with zeros for readability.
     ///
@@ -460,6 +528,45 @@ impl std::fmt::Display for DisplayTopUnits {
 
         if !started {
             write!(f, "0s")?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Wrapper for displaying a [`TimeSpan`] with discrete integer units, folding everything coarser
+/// than a specified largest unit into it. Obtained via [`TimeSpan::display_up_to`].
+pub struct DisplayUpTo {
+    ts: TimeSpan,
+    largest: TimeUnit,
+}
+
+impl std::fmt::Display for DisplayUpTo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Work in whole nanoseconds using u128 so the folded cap unit never overflows. Seeding the
+        // remainder with the full duration and dividing by the cap unit first makes it absorb all
+        // coarser magnitude; finer units then decompose the leftover.
+        let mut rem = self.ts.secs as u128 * 1_000_000_000 + self.ts.nanos as u128;
+        let start = self.largest.ordinal();
+        let mut first = true;
+
+        for unit in TimeUnit::ALL {
+            if unit.ordinal() < start {
+                continue;
+            }
+            let val = rem / unit.nanos();
+            rem %= unit.nanos();
+            if val > 0 {
+                if !first {
+                    write!(f, " ")?;
+                }
+                first = false;
+                write!(f, "{val}{}", unit.suffix())?;
+            }
+        }
+
+        if first {
+            write!(f, "0{}", self.largest.suffix())?;
         }
 
         Ok(())
@@ -1373,5 +1480,43 @@ mod tests {
         // Zero-valued intermediate fields are omitted
         let ts = TimeSpan::from_str("1h 3s").unwrap();
         assert_eq!(ts.display_down_to(TimeUnit::Seconds).to_string(), "1h 3s");
+    }
+
+    #[test]
+    fn display_up_to() {
+        // Folding accumulates across every coarser unit (the day becomes part of the hours).
+        let ts = TimeSpan::from_str("1d 1h 1m 1s").unwrap();
+        assert_eq!(ts.display_up_to(TimeUnit::Hours).to_string(), "25h 1m 1s");
+
+        // The finest end stays unbounded, so the sub-second tail is shown; a sub-second unit can
+        // itself be the cap, folding whole seconds into it.
+        let ts = TimeSpan::from(Duration::new(5, 500_200_003));
+        assert_eq!(
+            ts.display_up_to(TimeUnit::Seconds).to_string(),
+            "5s 500ms 200µs 3ns"
+        );
+        assert_eq!(
+            ts.display_up_to(TimeUnit::Milliseconds).to_string(),
+            "5500ms 200µs 3ns"
+        );
+
+        // Folding a very large span stays exact and cannot overflow (computed via u128).
+        let ts = TimeSpan::from(Duration::from_secs(u64::MAX));
+        assert_eq!(
+            ts.display_up_to(TimeUnit::Seconds).to_string(),
+            format!("{}s", u64::MAX)
+        );
+
+        // A zero span shows zero in the cap unit (display_range instead uses the smallest unit).
+        assert_eq!(
+            TimeSpan::default()
+                .display_up_to(TimeUnit::Hours)
+                .to_string(),
+            "0h"
+        );
+
+        // The cap unit is omitted when it is zero but finer units are present.
+        let ts = TimeSpan::from_str("90s").unwrap();
+        assert_eq!(ts.display_up_to(TimeUnit::Hours).to_string(), "1m 30s");
     }
 }
