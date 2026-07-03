@@ -970,8 +970,22 @@ pub struct AllOfSchema {
     pub list: &'static [&'static Schema],
 }
 
+const fn assert_only_objects_in_all_of(list: &'static [&'static Schema]) {
+    let mut i = 0;
+    while i != list.len() {
+        match list[i] {
+            Schema::Object(_) => (),
+            Schema::AllOf(sub) => assert_only_objects_in_all_of(sub.list),
+            Schema::OneOf(sub) => assert_only_objects_in_one_of(sub.list),
+            _ => panic!("non-object schema in all-of schema"),
+        }
+        i += 1;
+    }
+}
+
 impl AllOfSchema {
     pub const fn new(description: &'static str, list: &'static [&'static Schema]) -> Self {
+        assert_only_objects_in_all_of(list);
         Self { description, list }
     }
 
@@ -1056,6 +1070,19 @@ const fn assert_one_of_zero_or_one_string_schema(list: &[(&str, &Schema)]) {
                 panic!("oneOf can have only zero or one string variants");
             }
             already_seen = true;
+        }
+        i += 1;
+    }
+}
+
+const fn assert_only_objects_in_one_of(list: &'static [(&'static str, &'static Schema)]) {
+    let mut i = 0;
+    while i != list.len() {
+        match list[i].1 {
+            Schema::Object(_) => (),
+            Schema::AllOf(sub) => assert_only_objects_in_all_of(sub.list),
+            Schema::OneOf(sub) => assert_only_objects_in_one_of(sub.list),
+            _ => panic!("non-object schema in one-of schema"),
         }
         i += 1;
     }
