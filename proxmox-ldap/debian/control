@@ -39,9 +39,9 @@ Provides:
  librust-proxmox-ldap-1.1-dev (= ${binary:Version}),
  librust-proxmox-ldap-1.1+default-dev (= ${binary:Version}),
  librust-proxmox-ldap-1.1+types-dev (= ${binary:Version}),
- librust-proxmox-ldap-1.1.0-dev (= ${binary:Version}),
- librust-proxmox-ldap-1.1.0+default-dev (= ${binary:Version}),
- librust-proxmox-ldap-1.1.0+types-dev (= ${binary:Version})
+ librust-proxmox-ldap-1.1.1-dev (= ${binary:Version}),
+ librust-proxmox-ldap-1.1.1+default-dev (= ${binary:Version}),
+ librust-proxmox-ldap-1.1.1+types-dev (= ${binary:Version})
 Description: Proxmox library for LDAP authentication/synchronization - Rust source code
  Source code for Debianized Rust crate "proxmox-ldap"
 
@@ -57,13 +57,13 @@ Depends:
  librust-proxmox-access-control-1+impl-dev (>= 1.3.0-~~),
  librust-proxmox-auth-api-1+default-dev (>= 1.0.5-~~),
  librust-proxmox-product-config-1+default-dev,
- librust-proxmox-schema-5+default-dev (>= 5.1.1-~~),
+ librust-proxmox-schema-5+default-dev (>= 5.3.0-~~),
  librust-proxmox-section-config-3+default-dev (>= 3.1.0-~~),
  librust-serde-json-1+default-dev
 Provides:
  librust-proxmox-ldap-1+sync-dev (= ${binary:Version}),
  librust-proxmox-ldap-1.1+sync-dev (= ${binary:Version}),
- librust-proxmox-ldap-1.1.0+sync-dev (= ${binary:Version})
+ librust-proxmox-ldap-1.1.1+sync-dev (= ${binary:Version})
 Description: Proxmox library for LDAP authentication/synchronization - feature "sync"
  This metapackage enables feature "sync" for the Rust proxmox-ldap crate, by
  pulling in any additional dependencies needed by that feature.

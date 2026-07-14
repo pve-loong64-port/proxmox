@@ -1,3 +1,13 @@
+rust-proxmox-ldap (1.1.1-1) trixie; urgency=medium
+
+  * escape the user-provided user name when using it in the LDAP search
+    filter that looks up the user DN.
+
+  * log which user properties change when synchronizing an existing user,
+    instead of only reporting that the user was updated.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 14 Jul 2026 08:46:22 +0200
+
 rust-proxmox-ldap (1.1.0-1) bookworm; urgency=medium
 
   * add types and sync features. Allow sharing the implementation of the basic
