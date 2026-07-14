@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Display;
 
 use anyhow::{Context, Error, format_err};
 
@@ -204,10 +205,10 @@ impl LdapRealmSyncJob {
 
         if let Some(existing_user) = existing_user {
             if existing_user != new_or_updated_user {
-                if self.dry_run {
-                    log::info!("would update user {user_id}");
-                } else {
-                    log::info!("updating user {user_id}");
+                let verb = if self.dry_run { "would update" } else { "updating" };
+                log::info!("{verb} user {user_id}:");
+                for change in describe_user_changes(&existing_user, &new_or_updated_user) {
+                    log::info!("  {change}");
                 }
             }
         } else if self.dry_run {
@@ -355,6 +356,41 @@ impl LdapRealmSyncJob {
 
         Ok(())
     }
+}
+
+/// Describe which properties differ between an existing and a freshly synced user.
+///
+/// Returns one `field: old -> new` line per changed property, to give administrators a concise
+/// account of what a sync run changes rather than a bare "updating user" line. Present values are
+/// quoted so that a change to an empty string is distinguishable from a property being unset. The
+/// `userid` is the section key and thus always equal, so it is not compared.
+fn describe_user_changes(old: &User, new: &User) -> Vec<String> {
+    fn fmt_opt<T: Display>(value: Option<&T>) -> String {
+        value.map_or_else(|| "unset".to_string(), |value| format!("\"{value}\""))
+    }
+
+    let mut changes = Vec::new();
+
+    macro_rules! diff {
+        ($field:ident) => {
+            if old.$field != new.$field {
+                changes.push(format!(
+                    concat!(stringify!($field), ": {} -> {}"),
+                    fmt_opt(old.$field.as_ref()),
+                    fmt_opt(new.$field.as_ref()),
+                ));
+            }
+        };
+    }
+
+    diff!(enable);
+    diff!(expire);
+    diff!(comment);
+    diff!(firstname);
+    diff!(lastname);
+    diff!(email);
+
+    changes
 }
 
 /// General realm sync settings - Override for manual invocation
