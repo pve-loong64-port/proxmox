@@ -1,3 +1,15 @@
+rust-proxmox-sys (1.0.2-1) trixie; urgency=medium
+
+  * fix #7690: fs: replace_file: close the temporary file before renaming or
+    unlinking it, fixing the replacement on WORM file systems and avoiding
+    leftover .fuse_hidden files on FUSE mounts.
+
+  * fs: make_tmp_file: append the temporary suffix instead of replacing the
+    file extension, keeping the original file name intact for easier
+    debugging of leftover temporary files.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 14 Jul 2026 09:45:41 +0200
+
 rust-proxmox-sys (1.0.1-1) trixie; urgency=medium
 
   * various cleanups:
