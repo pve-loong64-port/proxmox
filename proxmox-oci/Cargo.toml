@@ -24,3 +24,4 @@ proxmox-io.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 proxmox-sys.workspace = true
+nix = { workspace = true, features = ["user"] }
