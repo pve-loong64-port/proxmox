@@ -22,4 +22,5 @@ zstd.workspace = true
 proxmox-io.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 proxmox-sys.workspace = true
