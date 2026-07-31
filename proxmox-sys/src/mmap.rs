@@ -18,6 +18,7 @@ pub struct Mmap<T> {
     len: usize,
 }
 
+/// Memory can be used and unmapped on another thread.
 unsafe impl<T> Send for Mmap<T> where T: Send {}
 unsafe impl<T> Sync for Mmap<T> where T: Sync {}
 
@@ -67,6 +68,20 @@ impl<T> Mmap<T> {
             )
         }
         .map_err(SysError::into_io_error)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Return the length (without creating a reference to the slice)
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Return the underlying pointer (without creating a reference to the slice)
+    pub fn as_non_null(&self) -> NonNull<T> {
+        self.data
     }
 }
 
