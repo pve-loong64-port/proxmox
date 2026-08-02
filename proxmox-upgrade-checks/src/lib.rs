@@ -1,13 +1,234 @@
+use std::fmt;
 use std::path::Path;
+use std::str::FromStr;
 use std::{io::Write, path::PathBuf};
 
-use anyhow::{Error, format_err};
-use const_format::concatcp;
+use anyhow::{Error, bail, format_err};
 use regex::Regex;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 use proxmox_apt::repositories;
-use proxmox_apt_api_types::{APTRepositoryFile, APTRepositoryPackageType};
+use proxmox_apt_api_types::{
+    APTRepositoryFile, APTRepositoryPackageType, APTUpdateInfo, DebianCodename,
+};
+
+/// Kernel series that the Proxmox products ship for Debian bookworm, i.e. Proxmox VE 8, Proxmox
+/// Backup Server 3 and Proxmox Datacenter Manager 0.x.
+pub const DEFAULT_PRE_UPGRADE_KERNELS: &[KernelSeries] = &[
+    KernelSeries::new(6, 2),
+    KernelSeries::new(6, 5),
+    KernelSeries::new(6, 8),
+    KernelSeries::new(6, 11),
+    KernelSeries::new(6, 14),
+];
+
+/// Oldest kernel version that the Proxmox products ship for Debian trixie, i.e. Proxmox VE 9,
+/// Proxmox Backup Server 4 and Proxmox Datacenter Manager 1.x.
+///
+/// The patch level is part of it because the bookworm builds of the 6.14 kernel only carry the
+/// `bpo12` marker since 6.14.5, the older ones are indistinguishable from a trixie build otherwise.
+pub const DEFAULT_MIN_POST_UPGRADE_KERNEL: KernelVersion = KernelVersion::new(6, 14, 5);
+
+/// The `major.minor` part of a kernel version, e.g. `6.14`.
+///
+/// Proxmox ships one kernel meta-package per series, like `proxmox-kernel-6.14`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KernelSeries {
+    pub major: u32,
+    pub minor: u32,
+}
+
+impl KernelSeries {
+    pub const fn new(major: u32, minor: u32) -> Self {
+        Self { major, minor }
+    }
+}
+
+impl From<(u32, u32)> for KernelSeries {
+    fn from((major, minor): (u32, u32)) -> Self {
+        Self::new(major, minor)
+    }
+}
+
+impl fmt::Display for KernelSeries {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+impl FromStr for KernelSeries {
+    type Err = Error;
+
+    /// Parse a bare `major.minor`, rejecting any trailing part.
+    ///
+    /// That keeps meta-packages like `proxmox-kernel-6.14` apart from anything else sharing their
+    /// prefix, be it an image package or something like `proxmox-kernel-7.0-build-deps`.
+    fn from_str(series: &str) -> Result<Self, Error> {
+        let Some((major, minor)) = series.split_once('.') else {
+            bail!("cannot parse kernel series '{series}' - expected 'major.minor'");
+        };
+        let parse = |part: &str, what: &str| -> Result<u32, Error> {
+            part.parse::<u32>()
+                .map_err(|err| format_err!("bad {what} version in '{series}' - {err}"))
+        };
+
+        Ok(Self::new(parse(major, "major")?, parse(minor, "minor")?))
+    }
+}
+
+/// An upstream kernel version, e.g. `6.14.5`, ordered from oldest to newest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KernelVersion {
+    pub series: KernelSeries,
+    pub patch: u32,
+}
+
+impl KernelVersion {
+    pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
+        Self {
+            series: KernelSeries::new(major, minor),
+            patch,
+        }
+    }
+}
+
+impl From<KernelSeries> for KernelVersion {
+    /// The oldest version of a series, as a series on its own says nothing about the patch level.
+    fn from(series: KernelSeries) -> Self {
+        Self { series, patch: 0 }
+    }
+}
+
+impl fmt::Display for KernelVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.series, self.patch)
+    }
+}
+
+impl FromStr for KernelVersion {
+    type Err = Error;
+
+    fn from_str(version: &str) -> Result<Self, Error> {
+        // strip the epoch and everything after the upstream version, both only exist on packages
+        let numbers = version.split_once(':').map_or(version, |(_, rest)| rest);
+        let numbers = numbers
+            .split_once('-')
+            .map_or(numbers, |(numbers, _)| numbers);
+
+        let mut numbers = numbers.split('.');
+        let (Some(major), Some(minor)) = (numbers.next(), numbers.next()) else {
+            bail!("cannot parse kernel version '{version}' - expected at least 'major.minor'");
+        };
+        // vendor and mainline kernels do not always have a patch level
+        let patch = numbers.next().unwrap_or("0");
+
+        // a component can carry a suffix, like Debian's `6.12.43+deb13-amd64` does
+        let parse = |part: &str, what: &str| -> Result<u32, Error> {
+            let digits = part
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap_or_default();
+
+            digits
+                .parse::<u32>()
+                .map_err(|err| format_err!("bad {what} version in '{version}' - {err}"))
+        };
+
+        Ok(Self {
+            series: KernelSeries::new(parse(major, "major")?, parse(minor, "minor")?),
+            patch: parse(patch, "patch")?,
+        })
+    }
+}
+
+/// A kernel as a system reports it, i.e. a version plus the Debian release it was built for.
+///
+/// `uname -r` shows `6.14.11-9-pve` for a trixie build and `6.14.11-9-bpo12-pve` for the bookworm
+/// backport of the same kernel, their package versions are `6.14.11-9` and `6.14.11-9~bpo12+1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KernelRelease {
+    pub version: KernelVersion,
+    /// The Debian major release this kernel got built for, if it is a backport at all.
+    pub backport: Option<u32>,
+}
+
+impl FromStr for KernelRelease {
+    type Err = Error;
+
+    fn from_str(release: &str) -> Result<Self, Error> {
+        Ok(Self {
+            version: release.parse()?,
+            backport: backport_marker(release),
+        })
+    }
+}
+
+/// Get the Debian major release a kernel got built for, if it carries a `bpo<N>` backport marker.
+///
+/// Proxmox marks the release in `uname -r` as `6.14.11-9-bpo12-pve` and in the matching package
+/// version as `6.14.11-9~bpo12+1`. Debian's own backports have no release in the marker of their
+/// release string, like `6.16.12+bpo-amd64`, so those simply do not match.
+fn backport_marker(version: &str) -> Option<u32> {
+    version
+        .split(['.', '-', '~', '+', ':'])
+        .find_map(|part| part.strip_prefix("bpo")?.parse().ok())
+}
+
+/// The Debian major release of a suite, as the `bpo<N>` marker of a backport refers to it.
+fn debian_release_major(suite: &str) -> Option<u32> {
+    Some(match DebianCodename::try_from(suite).ok()? {
+        DebianCodename::Bullseye => 11,
+        DebianCodename::Bookworm => 12,
+        DebianCodename::Trixie => 13,
+        DebianCodename::Forky => 14,
+        DebianCodename::Duke => 15,
+        // no product upgrading from an older release is still supported, and the newer ones
+        // cannot be known yet, so leave judging a backport marker against those to the caller
+        _ => return None,
+    })
+}
+
+/// Get the kernel of an installed Proxmox kernel meta-package, e.g. `proxmox-kernel-6.14`.
+///
+/// Returns `None` for any other package, in particular for the versioned kernel image packages.
+fn kernel_meta_package_release(pkg: &APTUpdateInfo) -> Option<KernelRelease> {
+    let series: KernelSeries = pkg
+        .package
+        .strip_prefix("proxmox-kernel-")
+        .or_else(|| pkg.package.strip_prefix("pve-kernel-"))?
+        .parse()
+        .ok()?;
+
+    // the installed version, not the candidate one, tells us what a reboot would boot into
+    let installed = pkg.old_version.as_deref()?;
+
+    let version = match installed.parse::<KernelVersion>() {
+        Ok(version) if version.series == series => version,
+        // transitional meta-packages have a versioning of their own, so only trust the name
+        _ => series.into(),
+    };
+
+    Some(KernelRelease {
+        version,
+        backport: backport_marker(installed),
+    })
+}
+
+fn running_kernel_release() -> Result<String, Error> {
+    let output = std::process::Command::new("uname")
+        .arg("-r")
+        .output()
+        .map_err(|err| format_err!("failed to retrieve running kernel version - {err}"))?;
+
+    if !output.status.success() {
+        bail!(
+            "failed to retrieve running kernel version - uname {}",
+            output.status
+        );
+    }
+
+    Ok(std::str::from_utf8(&output.stdout)?.trim().to_string())
+}
 
 /// Easily create and configure an upgrade checker for Proxmox products.
 pub struct UpgradeCheckerBuilder {
@@ -21,6 +242,8 @@ pub struct UpgradeCheckerBuilder {
     api_server_package: Option<String>,
     running_api_server_version: String,
     services_list: Vec<String>,
+    pre_upgrade_kernels: Vec<KernelSeries>,
+    min_post_upgrade_kernel: KernelVersion,
 }
 
 impl UpgradeCheckerBuilder {
@@ -53,6 +276,8 @@ impl UpgradeCheckerBuilder {
             api_server_package: None,
             running_api_server_version: running_api_server_version.into(),
             services_list: Vec::new(),
+            pre_upgrade_kernels: DEFAULT_PRE_UPGRADE_KERNELS.to_vec(),
+            min_post_upgrade_kernel: DEFAULT_MIN_POST_UPGRADE_KERNEL,
         }
     }
 
@@ -71,6 +296,31 @@ impl UpgradeCheckerBuilder {
     /// Add a service to the list of services that will be checked.
     pub fn add_service_to_checks(mut self, service_name: &str) -> Self {
         self.services_list.push(service_name.into());
+        self
+    }
+
+    /// Set the kernel series that are suitable to run before the upgrade.
+    ///
+    /// Those are matched exactly, as the releases before an upgrade got a fixed set of kernels.
+    /// Defaults to [`DEFAULT_PRE_UPGRADE_KERNELS`].
+    pub fn pre_upgrade_kernels<I>(mut self, series: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<KernelSeries>,
+    {
+        self.pre_upgrade_kernels = series.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Set the oldest kernel version that is suitable to run after the upgrade.
+    ///
+    /// Any newer one passes too, so that kernels released after this check was written are
+    /// accepted, but a kernel backported to a Debian release older than the new suite never is.
+    /// Spell out the patch level, it is what tells apart the builds of a series that got shipped
+    /// for both the old and the new release.
+    /// Defaults to [`DEFAULT_MIN_POST_UPGRADE_KERNEL`].
+    pub fn min_post_upgrade_kernel(mut self, version: KernelVersion) -> Self {
+        self.min_post_upgrade_kernel = version;
         self
     }
 
@@ -96,6 +346,8 @@ impl UpgradeCheckerBuilder {
             running_api_server_version: self.running_api_server_version,
             meta_package_name: self.meta_package_name,
             services_list: self.services_list,
+            pre_upgrade_kernels: self.pre_upgrade_kernels,
+            min_post_upgrade_kernel: self.min_post_upgrade_kernel,
         }
     }
 }
@@ -114,6 +366,8 @@ pub struct UpgradeChecker {
     api_server_package: String,
     running_api_server_version: String,
     services_list: Vec<String>,
+    pre_upgrade_kernels: Vec<KernelSeries>,
+    min_post_upgrade_kernel: KernelVersion,
 }
 
 impl UpgradeChecker {
@@ -189,10 +443,7 @@ impl UpgradeChecker {
         Ok(())
     }
 
-    fn check_meta_package_version(
-        &mut self,
-        pkg_versions: &[proxmox_apt_api_types::APTUpdateInfo],
-    ) -> Result<(), Error> {
+    fn check_meta_package_version(&mut self, pkg_versions: &[APTUpdateInfo]) -> Result<(), Error> {
         self.output.log_info(format!(
             "Checking {} package version..",
             self.meta_package_name
@@ -250,68 +501,70 @@ impl UpgradeChecker {
         Ok(())
     }
 
-    fn is_kernel_version_compatible(&self, running_version: &str) -> bool {
-        // TODO: rework this to parse out maj.min.patch and do numerical comparison and detect
-        // those with a "bpo12" as backport kernels from the older release.
-        const MINIMUM_RE: &str = r"6\.(?:14\.(?:[1-9]\d+|[6-9])|1[5-9])[^~]*";
-        const ARBITRARY_RE: &str = r"(?:1[4-9]|2\d+)\.(?:[0-9]|\d{2,})[^~]*-pve";
+    /// Whether a kernel is one the product expects to run at the current stage of the upgrade.
+    fn is_kernel_suitable(&self, kernel: KernelRelease) -> bool {
+        if !self.upgraded {
+            return self.pre_upgrade_kernels.contains(&kernel.version.series);
+        }
+        // a kernel built for an older Debian release than the new suite predates the upgrade, an
+        // unknown suite keeps that conservative, as backports mostly go to the older release
+        let predates_upgrade = kernel.backport.is_some_and(|backport| {
+            debian_release_major(&self.new_suite).is_none_or(|new_release| backport < new_release)
+        });
 
-        let re = if self.upgraded {
-            concatcp!(r"^(?:", MINIMUM_RE, r"|", ARBITRARY_RE, r")$")
-        } else {
-            r"^(?:6\.(?:2|5|8|11|14))"
-        };
-        let re = Regex::new(re).expect("failed to compile kernel compat regex");
-
-        re.is_match(running_version)
+        !predates_upgrade && kernel.version >= self.min_post_upgrade_kernel
     }
 
-    fn check_kernel_compat(
-        &mut self,
-        pkg_versions: &[proxmox_apt_api_types::APTUpdateInfo],
-    ) -> Result<(), Error> {
+    /// Get the newest installed kernel meta-package that would be suitable to run.
+    fn find_suitable_installed_kernel<'a>(
+        &self,
+        pkg_versions: &'a [APTUpdateInfo],
+    ) -> Option<&'a str> {
+        pkg_versions
+            .iter()
+            .filter_map(|pkg| {
+                let kernel = kernel_meta_package_release(pkg)?;
+                self.is_kernel_suitable(kernel)
+                    .then_some((kernel.version, pkg.package.as_str()))
+            })
+            .max_by_key(|(version, _)| *version)
+            .map(|(_, package)| package)
+    }
+
+    fn check_kernel_compat(&mut self, pkg_versions: &[APTUpdateInfo]) -> Result<(), Error> {
         self.output.log_info("Check running kernel version..")?;
 
-        let kinstalled = if self.upgraded {
-            "proxmox-kernel-6.14"
-        } else {
-            "proxmox-kernel-6.8"
+        let running_version = match running_kernel_release() {
+            Ok(running_version) => running_version,
+            Err(err) => {
+                self.output.log_fail(err.to_string())?;
+                return Ok(());
+            }
         };
 
-        let output = std::process::Command::new("uname").arg("-r").output();
-        match output {
-            Err(_err) => self
-                .output
-                .log_fail("unable to determine running kernel version.")?,
-            Ok(ret) => {
-                let running_version = std::str::from_utf8(&ret.stdout[..ret.stdout.len() - 1])?;
-                if self.is_kernel_version_compatible(running_version) {
-                    if self.upgraded {
-                        self.output.log_pass(format!(
-                            "running new kernel '{running_version}' after upgrade."
-                        ))?;
-                    } else {
-                        self.output.log_pass(format!(
-                            "running kernel '{running_version}' is considered suitable for \
-                            upgrade."
-                        ))?;
-                    }
-                } else {
-                    let installed_kernel = pkg_versions
-                        .iter()
-                        .find(|pkg| pkg.package.as_str() == kinstalled);
-                    if installed_kernel.is_some() {
-                        self.output.log_warn(format!(
-                            "a suitable kernel '{kinstalled}' is installed, but an \
-                            unsuitable '{running_version}' is booted, missing reboot?!",
-                        ))?;
-                    } else {
-                        self.output.log_warn(format!(
-                            "unexpected running and installed kernel '{running_version}'.",
-                        ))?;
-                    }
-                }
+        let suitable = running_version
+            .parse::<KernelRelease>()
+            .is_ok_and(|kernel| self.is_kernel_suitable(kernel));
+
+        if suitable {
+            if self.upgraded {
+                self.output.log_pass(format!(
+                    "running new kernel '{running_version}' after upgrade."
+                ))?;
+            } else {
+                self.output.log_pass(format!(
+                    "running kernel '{running_version}' is considered suitable for upgrade."
+                ))?;
             }
+        } else if let Some(installed) = self.find_suitable_installed_kernel(pkg_versions) {
+            self.output.log_warn(format!(
+                "a suitable kernel '{installed}' is installed, but an unsuitable \
+                '{running_version}' is booted, missing reboot?!",
+            ))?;
+        } else {
+            self.output.log_warn(format!(
+                "unexpected running and installed kernel '{running_version}'.",
+            ))?;
         }
         Ok(())
     }
@@ -797,11 +1050,7 @@ impl ConsoleOutput {
 mod tests {
     use super::*;
 
-    fn test_is_kernel_version_compatible(
-        expected_versions: &[&str],
-        unexpected_versions: &[&str],
-        upgraded: bool,
-    ) {
+    fn make_checker(upgraded: bool) -> UpgradeChecker {
         let mut checker = UpgradeCheckerBuilder::new(
             "bookworm",
             "trixie",
@@ -814,16 +1063,46 @@ mod tests {
         .build();
 
         checker.upgraded = upgraded;
+        checker
+    }
+
+    fn installed_kernel_package(package: &str, version: &str) -> APTUpdateInfo {
+        APTUpdateInfo {
+            package: package.to_string(),
+            title: "kernel".to_string(),
+            arch: "amd64".to_string(),
+            description: "kernel".to_string(),
+            version: version.to_string(),
+            old_version: Some(version.to_string()),
+            origin: "Proxmox".to_string(),
+            priority: "optional".to_string(),
+            section: "admin".to_string(),
+            extra_info: None,
+        }
+    }
+
+    fn test_is_kernel_version_compatible(
+        expected_versions: &[&str],
+        unexpected_versions: &[&str],
+        upgraded: bool,
+    ) {
+        let checker = make_checker(upgraded);
 
         for version in expected_versions {
+            let kernel = version
+                .parse()
+                .unwrap_or_else(|err| panic!("failed to parse kernel version '{version}' - {err}"));
             assert!(
-                checker.is_kernel_version_compatible(version),
+                checker.is_kernel_suitable(kernel),
                 "compatible kernel version '{version}' did not pass as expected!"
             );
         }
         for version in unexpected_versions {
+            let suitable = version
+                .parse()
+                .is_ok_and(|kernel| checker.is_kernel_suitable(kernel));
             assert!(
-                !checker.is_kernel_version_compatible(version),
+                !suitable,
                 "incompatible kernel version '{version}' passed as expected!"
             );
         }
@@ -831,17 +1110,179 @@ mod tests {
 
     #[test]
     fn test_before_upgrade_kernel_version_compatibility() {
-        let expected_versions = &["6.2.16-20-pve", "6.5.13-6-pve", "6.8.12-1-pve"];
-        let unexpected_versions = &["6.1.10-1-pve", "5.19.17-2-pve"];
+        let expected_versions = &[
+            "6.2.16-20-pve",
+            "6.5.13-6-pve",
+            "6.8.12-13-pve",
+            "6.11.11-2-pve",
+            // the opt-in 6.14 kernel for bookworm, before and after it got the backport marker
+            "6.14.4-1-pve",
+            "6.14.11-9-bpo12-pve",
+        ];
+        let unexpected_versions = &[
+            "6.1.10-1-pve",
+            "5.19.17-2-pve",
+            "6.1.0-18-amd64",
+            "6.17.2-1-pve",
+            "not-a-kernel-version",
+        ];
 
         test_is_kernel_version_compatible(expected_versions, unexpected_versions, false);
     }
 
     #[test]
     fn test_after_upgrade_kernel_version_compatibility() {
-        let expected_versions = &["6.14.6-1-pve", "6.17.0-1-pve"];
-        let unexpected_versions = &["6.12.1-1-pve", "6.2.1-1-pve"];
+        let expected_versions = &[
+            "6.14.5-1-pve",
+            "6.14.11-9-pve",
+            "6.17.2-1-pve",
+            "6.20.1-1-pve",
+            "7.0.14-6-pve",
+            // Debian's own backports carry no release in the marker, so they are not from bookworm
+            "6.16.12+bpo-amd64",
+        ];
+        let unexpected_versions = &[
+            // Debian's own kernel is older than what the products ship, as it was before too
+            "6.12.43+deb13-amd64",
+            "6.8.12-13-pve",
+            // the bookworm builds of 6.14 predating the backport marker
+            "6.14.0-2-pve",
+            "6.14.4-1-pve",
+            // and those carrying it, which can be newer than the trixie kernel one rebooted into
+            "6.14.11-9-bpo12-pve",
+            "6.20.1-1-bpo12-pve",
+            "not-a-kernel-version",
+        ];
 
         test_is_kernel_version_compatible(expected_versions, unexpected_versions, true);
+    }
+
+    #[test]
+    fn test_kernel_backported_to_the_new_suite_is_suitable() {
+        // a kernel backported to the release upgraded *to* is a newer one, not a leftover
+        let checker = make_checker(true);
+        let kernel: KernelRelease = "6.20.1-1-bpo13-pve"
+            .parse()
+            .expect("failed to parse kernel");
+        assert!(checker.is_kernel_suitable(kernel));
+
+        // while for an upgrade to a later release the very same kernel is a leftover
+        let mut checker = make_checker(true);
+        checker.new_suite = "duke".to_string();
+        assert!(!checker.is_kernel_suitable(kernel));
+
+        // sid is no release, so without a Debian version to compare to any backport counts as one
+        checker.new_suite = "sid".to_string();
+        assert!(!checker.is_kernel_suitable(kernel));
+    }
+
+    fn parse_kernel(release: &str) -> KernelRelease {
+        release
+            .parse()
+            .unwrap_or_else(|err| panic!("failed to parse kernel release '{release}' - {err}"))
+    }
+
+    #[test]
+    fn test_parse_kernel_release() {
+        let kernel = parse_kernel("6.14.11-9-pve");
+        assert_eq!(kernel.version, KernelVersion::new(6, 14, 11));
+        assert_eq!(kernel.backport, None);
+
+        assert_eq!(parse_kernel("6.14.11-9-bpo12-pve").backport, Some(12));
+
+        // package versions use different separators around the backport marker and have an epoch
+        let kernel = parse_kernel("1:6.14.11-9~bpo12+1");
+        assert_eq!(kernel.version, KernelVersion::new(6, 14, 11));
+        assert_eq!(kernel.backport, Some(12));
+
+        // Debian appends the release to the upstream version, and its backports have no release
+        let kernel = parse_kernel("6.12.43+deb13-amd64");
+        assert_eq!(kernel.version, KernelVersion::new(6, 12, 43));
+        assert_eq!(kernel.backport, None);
+        let kernel = parse_kernel("6.16.12+bpo-amd64");
+        assert_eq!(kernel.version, KernelVersion::new(6, 16, 12));
+        assert_eq!(kernel.backport, None);
+
+        // a missing patch level is common for mainline and vendor kernels
+        assert_eq!(parse_kernel("7.0-rc1").version, KernelVersion::new(7, 0, 0));
+
+        for release in ["", "6", "6.x.1-1-pve", "+6.14.1-1-pve", "linux"] {
+            assert!(
+                release.parse::<KernelRelease>().is_err(),
+                "bogus kernel release '{release}' parsed as expected!"
+            );
+        }
+    }
+
+    #[test]
+    fn test_kernel_versions_order_by_age() {
+        let mut versions = [
+            KernelVersion::new(6, 14, 11),
+            KernelVersion::new(7, 0, 14),
+            KernelVersion::new(6, 2, 16),
+            KernelVersion::new(6, 14, 5),
+        ];
+        versions.sort();
+
+        assert_eq!(
+            versions,
+            [
+                KernelVersion::new(6, 2, 16),
+                KernelVersion::new(6, 14, 5),
+                KernelVersion::new(6, 14, 11),
+                KernelVersion::new(7, 0, 14),
+            ]
+        );
+        assert_eq!(
+            KernelVersion::from(KernelSeries::new(6, 14)),
+            KernelVersion::new(6, 14, 0)
+        );
+    }
+
+    #[test]
+    fn test_find_suitable_installed_kernel() {
+        let packages = &[
+            installed_kernel_package("proxmox-kernel-helper", "9.2.0"),
+            installed_kernel_package("proxmox-kernel-libc-dev", "7.0.14-2"),
+            installed_kernel_package("proxmox-kernel-7.0-build-deps", "7.0.6-1"),
+            installed_kernel_package("proxmox-kernel-6.8", "6.8.12-16"),
+            installed_kernel_package("proxmox-kernel-6.14", "6.14.11-9"),
+            installed_kernel_package("proxmox-kernel-6.14.11-9-pve-signed", "6.14.11-9"),
+            installed_kernel_package("proxmox-kernel-6.17", "6.17.2-1"),
+        ];
+
+        let checker = make_checker(true);
+        assert_eq!(
+            checker.find_suitable_installed_kernel(packages),
+            Some("proxmox-kernel-6.17")
+        );
+
+        let checker = make_checker(false);
+        assert_eq!(
+            checker.find_suitable_installed_kernel(packages),
+            Some("proxmox-kernel-6.14")
+        );
+
+        // a backported meta-package is not suitable after the upgrade, but before it is
+        let backport = &[installed_kernel_package(
+            "proxmox-kernel-6.14",
+            "6.14.11-9~bpo12+1",
+        )];
+        assert_eq!(
+            make_checker(true).find_suitable_installed_kernel(backport),
+            None
+        );
+        assert_eq!(
+            make_checker(false).find_suitable_installed_kernel(backport),
+            Some("proxmox-kernel-6.14")
+        );
+
+        // as is one that is too old, here the bookworm 6.14 from before the backport marker
+        let old = &[installed_kernel_package("proxmox-kernel-6.14", "6.14.4-1")];
+        assert_eq!(make_checker(true).find_suitable_installed_kernel(old), None);
+        assert_eq!(
+            make_checker(false).find_suitable_installed_kernel(old),
+            Some("proxmox-kernel-6.14")
+        );
     }
 }
