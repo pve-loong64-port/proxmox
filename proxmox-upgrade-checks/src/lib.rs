@@ -707,15 +707,16 @@ impl UpgradeChecker {
     }
 
     fn check_dkms_modules(&mut self) -> Result<(), Error> {
-        let kver = std::process::Command::new("uname")
-            .arg("-r")
-            .output()
-            .map_err(|err| format_err!("failed to retrieve running kernel version - {err}"))?;
+        let Ok(running_version) = running_kernel_release() else {
+            self.output
+                .log_skip("could not get dkms status for the running kernel")?;
+            return Ok(());
+        };
 
         let output = std::process::Command::new("dkms")
             .arg("status")
             .arg("-k")
-            .arg(std::str::from_utf8(&kver.stdout)?)
+            .arg(running_version)
             .output();
         match output {
             Err(_err) => self.output.log_skip("could not get dkms status")?,
