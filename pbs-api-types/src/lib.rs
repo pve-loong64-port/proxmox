@@ -174,7 +174,8 @@ const_regex! {
         "):)?(?:([0-9]{1,5}):)?(", PROXMOX_SAFE_ID_REGEX_STR, r")$"
     );
 
-     pub SUBSCRIPTION_KEY_REGEX = "^pbs(?:[cbsp])-[0-9a-f]{10}$";
+     // arm64 keys carry an explicit '-arm-' architecture marker, for example pbss-arm-0011223344
+     pub SUBSCRIPTION_KEY_REGEX = "^pbs(?:[cbsp])-(?:arm-)?[0-9a-f]{10}$";
 }
 
 pub const PVE_CONFIG_DIGEST_FORMAT: ApiStringFormat = ApiStringFormat::Pattern(&SHA256_HEX_REGEX);
@@ -229,7 +230,8 @@ pub const SUBSCRIPTION_KEY_SCHEMA: Schema =
     StringSchema::new("Proxmox Backup Server subscription key.")
         .format(&SUBSCRIPTION_KEY_FORMAT)
         .min_length(15)
-        .max_length(16)
+        // arm64 keys are longer due to the '-arm-' marker, for example pbss-arm-0011223344
+        .max_length(20)
         .schema();
 
 pub const PROXMOX_CONFIG_DIGEST_SCHEMA: Schema = StringSchema::new(
