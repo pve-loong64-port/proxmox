@@ -1,3 +1,23 @@
+rust-proxmox-upgrade-checks (1.1.0-1) trixie; urgency=medium
+
+  * kernel check: compare the parsed version instead of matching patterns:
+    - accept the 7.0 kernel of the trixie based releases, which got reported as
+      unexpected before, and any future series without needing an update here.
+    - report a kernel that was backported to the release upgraded from, marked
+      as 'bpo12' for bookworm, as one still to be rebooted from. Those passed
+      as an already upgraded kernel until now.
+    - point at any installed kernel meta-package that would be suitable to
+      boot, which covers the opt-in ones like 6.17 too.
+
+  * dkms check: pass the running kernel release on without the trailing
+    newline, as dkms could not match any module for such a version and thus
+    always reported that none are installed.
+
+  * allow products to configure the kernels expected before and after the
+    upgrade, as those differ per major upgrade.
+
+ -- Proxmox Support Team <support@proxmox.com>  Sun, 02 Aug 2026 21:59:29 +0200
+
 rust-proxmox-upgrade-checks (1.0.2-1) trixie; urgency=medium
 
   * re-build for proxmox-apt 1.0 and proxmox-apt-api-types 3.0; the
