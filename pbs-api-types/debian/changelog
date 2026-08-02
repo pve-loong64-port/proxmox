@@ -1,3 +1,10 @@
+rust-pbs-api-types (1.0.19-1) trixie; urgency=medium
+
+  * accept arm64 subscription keys, which carry an explicit architecture
+    marker, in the subscription key format and schema.
+
+ -- Proxmox Support Team <support@proxmox.com>  Sun, 02 Aug 2026 16:46:04 +0200
+
 rust-pbs-api-types (1.0.18-1) trixie; urgency=medium
 
   * derive FromStr for DatastoreTuning so callers can parse the tuning
