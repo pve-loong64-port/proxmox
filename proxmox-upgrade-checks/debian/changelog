@@ -1,3 +1,12 @@
+rust-proxmox-upgrade-checks (1.1.1-1) trixie; urgency=medium
+
+  * detect an upgrade to a 1.0 release as done for products that were still at
+    0.x before, like the Datacenter Manager, whose upgraded package got
+    reported as too old, which in turn made all follow-up checks run in their
+    not yet upgraded variant.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 04 Aug 2026 00:02:58 +0200
+
 rust-proxmox-upgrade-checks (1.1.0-1) trixie; urgency=medium
 
   * kernel check: compare the parsed version instead of matching patterns:
