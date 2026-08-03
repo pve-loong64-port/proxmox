@@ -443,6 +443,24 @@ impl UpgradeChecker {
         Ok(())
     }
 
+    /// Judge the installed version of the product's meta package against the required minimum.
+    fn meta_package_state(&self, maj: u8, min: u8, pkgrel: u8) -> MetaPackageState {
+        // a bumped major means the upgrade happened, except while a product is still at 0.x, as
+        // there the minor is what marks its releases
+        if maj > self.minimum_major_version
+            || (self.minimum_major_version == 0 && min > self.minimum_minor_version)
+        {
+            MetaPackageState::Upgraded
+        } else if maj >= self.minimum_major_version
+            && min >= self.minimum_minor_version
+            && pkgrel >= self.minimum_pkgrel
+        {
+            MetaPackageState::MeetsMinimum
+        } else {
+            MetaPackageState::TooOld
+        }
+    }
+
     fn check_meta_package_version(&mut self, pkg_versions: &[APTUpdateInfo]) -> Result<(), Error> {
         self.output.log_info(format!(
             "Checking {} package version..",
@@ -466,26 +484,24 @@ impl UpgradeChecker {
                     self.minimum_major_version, self.minimum_minor_version, self.minimum_pkgrel
                 );
 
-                if (maj > self.minimum_major_version && self.minimum_major_version != 0)
-                    // Handle alpha and beta version upgrade checks:
-                    || (self.minimum_major_version == 0 && min > self.minimum_minor_version)
-                {
-                    self.output
-                        .log_pass(format!("Already upgraded to {maj}.{min}"))?;
-                    self.upgraded = true;
-                } else if maj >= self.minimum_major_version
-                    && min >= self.minimum_minor_version
-                    && pkgrel >= self.minimum_pkgrel
-                {
-                    self.output.log_pass(format!(
-                        "'{}' has version >= {min_version}",
-                        self.meta_package_name
-                    ))?;
-                } else {
-                    self.output.log_fail(format!(
-                        "'{}' package is too old, please upgrade to >= {min_version}",
-                        self.meta_package_name
-                    ))?;
+                match self.meta_package_state(maj, min, pkgrel) {
+                    MetaPackageState::Upgraded => {
+                        self.output
+                            .log_pass(format!("Already upgraded to {maj}.{min}"))?;
+                        self.upgraded = true;
+                    }
+                    MetaPackageState::MeetsMinimum => {
+                        self.output.log_pass(format!(
+                            "'{}' has version >= {min_version}",
+                            self.meta_package_name
+                        ))?;
+                    }
+                    MetaPackageState::TooOld => {
+                        self.output.log_fail(format!(
+                            "'{}' package is too old, please upgrade to >= {min_version}",
+                            self.meta_package_name
+                        ))?;
+                    }
                 }
             } else {
                 self.output.log_fail(format!(
@@ -880,6 +896,17 @@ impl UpgradeChecker {
     }
 }
 
+/// How the installed version of a product's meta package relates to the upgrade.
+#[derive(Debug, PartialEq)]
+enum MetaPackageState {
+    /// Already at a release from after the upgrade.
+    Upgraded,
+    /// Old enough to still face the upgrade, but new enough to go through with it.
+    MeetsMinimum,
+    /// Too old to upgrade from directly.
+    TooOld,
+}
+
 #[derive(PartialEq)]
 enum SystemdUnitState {
     Active,
@@ -1051,17 +1078,21 @@ impl ConsoleOutput {
 mod tests {
     use super::*;
 
-    fn make_checker(upgraded: bool) -> UpgradeChecker {
-        let mut checker = UpgradeCheckerBuilder::new(
+    fn checker_for(meta_package: &str, maj: u8, min: u8, pkgrel: u8) -> UpgradeChecker {
+        UpgradeCheckerBuilder::new(
             "bookworm",
             "trixie",
-            "proxmox-backup",
-            3,
-            4,
-            0,
-            "running version: 3.4",
+            meta_package,
+            maj,
+            min,
+            pkgrel,
+            "running version: 1.0",
         )
-        .build();
+        .build()
+    }
+
+    fn make_checker(upgraded: bool) -> UpgradeChecker {
+        let mut checker = checker_for("proxmox-backup", 3, 4, 0);
 
         checker.upgraded = upgraded;
         checker
@@ -1213,6 +1244,26 @@ mod tests {
                 "bogus kernel release '{release}' parsed as expected!"
             );
         }
+    }
+
+    #[test]
+    fn test_meta_package_state() {
+        use MetaPackageState::*;
+
+        // Proxmox Backup Server, upgrading from 3.4 to 4.x
+        let checker = checker_for("proxmox-backup", 3, 4, 0);
+        assert_eq!(checker.meta_package_state(4, 0, 1), Upgraded);
+        assert_eq!(checker.meta_package_state(3, 4, 0), MeetsMinimum);
+        assert_eq!(checker.meta_package_state(3, 3, 7), TooOld);
+
+        // Proxmox Datacenter Manager, whose last bookworm release was 0.1.11, so that its
+        // releases got marked by the minor version until it reached 1.0
+        let checker = checker_for("proxmox-datacenter-manager", 0, 1, 11);
+        assert_eq!(checker.meta_package_state(1, 1, 7), Upgraded);
+        assert_eq!(checker.meta_package_state(1, 0, 0), Upgraded);
+        assert_eq!(checker.meta_package_state(0, 2, 0), Upgraded);
+        assert_eq!(checker.meta_package_state(0, 1, 11), MeetsMinimum);
+        assert_eq!(checker.meta_package_state(0, 1, 10), TooOld);
     }
 
     #[test]
