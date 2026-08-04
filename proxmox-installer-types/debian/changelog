@@ -1,3 +1,10 @@
+rust-proxmox-installer-types (0.2.0-1) trixie; urgency=medium
+
+  * replace wrong use of oneOf schema with an empty object allowing additional
+    properties via its schema
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 04 Aug 2026 15:21:17 +0200
+
 rust-proxmox-installer-types (0.1.2-1) trixie; urgency=medium
 
   * fix #7682: installer-types: use correct kebab-case variant of arc-max
