@@ -18,8 +18,8 @@ use proxmox_network_types::{fqdn::Fqdn, ip_address::Cidr};
 
 #[cfg(feature = "api-types")]
 use proxmox_schema::{
-    ApiType, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Schema, StringSchema, Updater,
-    UpdaterType, api,
+    ApiType, IntegerSchema, NumberSchema, ObjectSchema, Schema, StringSchema, Updater, UpdaterType,
+    api,
     api_types::{DISK_ARRAY_SCHEMA, PASSWORD_FORMAT},
 };
 
@@ -170,6 +170,10 @@ pub const ROOT_PASSWORD_SCHEMA: proxmox_schema::Schema = StringSchema::new("Root
             optional: true,
             schema: SUBSCRIPTION_KEY_SCHEMA,
         },
+        fqdn: {
+            type: FqdnConfigContainer,
+            flatten: true,
+        },
     },
 ))]
 #[derive(Clone, Default, Deserialize, Debug, Serialize, PartialEq)]
@@ -179,8 +183,6 @@ pub const ROOT_PASSWORD_SCHEMA: proxmox_schema::Schema = StringSchema::new("Root
 pub struct GlobalOptions {
     /// Country to use for apt mirrors.
     pub country: String,
-    /// FQDN to set for the installed system.
-    pub fqdn: FqdnConfig,
     /// Keyboard layout to set.
     pub keyboard: KeyboardLayout,
     /// Mail address for `root@pam`.
@@ -214,6 +216,9 @@ pub struct GlobalOptions {
     /// Optional Proxmox subscription key to apply to the installed system on
     /// first boot. Restricted to PVE, PBS and PMG keys.
     pub subscription_key: Option<String>,
+    /// FQDN to set for the installed system.
+    #[serde(flatten)]
+    pub fqdn: FqdnConfigContainer,
 }
 
 #[cfg_attr(feature = "api-types", api)]
@@ -251,23 +256,6 @@ impl Default for FqdnConfig {
     }
 }
 
-#[cfg(feature = "api-types")]
-impl ApiType for FqdnConfig {
-    const API_SCHEMA: Schema = OneOfSchema::new(
-        "Either a FQDN as string or an object describing the retrieval method.",
-        &(
-            "type",
-            false,
-            &StringSchema::new("A string or an object").schema(),
-        ),
-        &[
-            ("from-dhcp", &<FqdnFromDhcpConfig as ApiType>::API_SCHEMA),
-            ("simple", &StringSchema::new("Plain FQDN").schema()),
-        ],
-    )
-    .schema();
-}
-
 impl FqdnConfig {
     /// Constructs a new "simple" FQDN configuration, i.e. a fixed hostname.
     pub fn simple<S: Into<String>>(fqdn: S) -> Result<Self> {
@@ -285,6 +273,36 @@ impl FqdnConfig {
             source: FqdnSourceMode::FromDhcp,
             domain,
         })
+    }
+}
+
+#[cfg(feature = "api-types")]
+impl ApiType for FqdnConfigContainer {
+    const API_SCHEMA: Schema = ObjectSchema::new(
+        "Either a FQDN as string or an object describing the retrieval method in an 'fqdn' field.",
+        &[],
+    )
+    .additional_properties(true)
+    .schema();
+}
+
+/// This is a wrapping container for the `fqdn` field. The field does not fit into our supported
+/// schema system and thus, from the schema point of view, we use an empty
+/// `additionalProperties: true` object schema for it.
+#[derive(Clone, Default, Deserialize, Debug, Serialize, PartialEq)]
+pub struct FqdnConfigContainer {
+    fqdn: FqdnConfig,
+}
+
+impl From<FqdnConfig> for FqdnConfigContainer {
+    fn from(fqdn: FqdnConfig) -> Self {
+        Self { fqdn }
+    }
+}
+
+impl From<FqdnConfigContainer> for FqdnConfig {
+    fn from(fqdn: FqdnConfigContainer) -> Self {
+        fqdn.fqdn
     }
 }
 
