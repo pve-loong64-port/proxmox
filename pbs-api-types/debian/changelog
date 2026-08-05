@@ -1,3 +1,14 @@
+rust-pbs-api-types (1.0.20-1) trixie; urgency=medium
+
+  * add stricter archive name parsing that rejects server side type extension
+    coercion and path components, for use where the API compatible parsing is
+    too lax, like when reading the file names from a backup manifest.
+
+  * derive PartialOrd and Ord for BackupArchiveName to allow sorting
+    collections of archive names.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 05 Aug 2026 17:59:10 +0200
+
 rust-pbs-api-types (1.0.19-1) trixie; urgency=medium
 
   * accept arm64 subscription keys, which carry an explicit architecture
