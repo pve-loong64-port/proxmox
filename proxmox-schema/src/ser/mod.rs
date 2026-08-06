@@ -224,7 +224,8 @@ impl<T: fmt::Write> SerializeStruct<T> {
             self.value_schema = schema.lookup(&key).map(|(_optional, schema)| schema);
             if self.value_schema.is_none() && !schema.additional_properties() {
                 return Err(Error::msg(format!(
-                    "key {key:?} is not part of the schema and it does not allow additional properties"
+                    "key {key:?} \
+                    is not part of the schema and it does not allow additional properties"
                 )));
             }
             if schema.default_key() == Some(&key[..]) {
