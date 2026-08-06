@@ -71,6 +71,40 @@ fn test_a_or_b_schema() {
     assert_eq!(TEST_SCHEMA, AOrB::API_SCHEMA);
 }
 
+#[test]
+fn test_a_or_b_json_schema_macro() {
+    const TEST_SCHEMA: ::proxmox_schema::Schema = proxmox_api_macro::json_schema! {
+        description: "An A or a B.",
+        "type-property": "type",
+        "type-property-schema": {
+            type: String,
+            description: "Type of the object.",
+            format: &schema::ApiStringFormat::Enum(&[
+                schema::EnumEntry {
+                    value: "A",
+                    description: "Type A.",
+                },
+                schema::EnumEntry {
+                    value: "B",
+                    description: "Type B.",
+                },
+            ]),
+        },
+        oneOf: [
+            {
+                "instance-type": "A",
+                type: NameValue,
+            },
+            {
+                "instance-type": "B",
+                type: IndexText,
+            },
+        ],
+    };
+
+    assert_eq!(TEST_SCHEMA, AOrB::API_SCHEMA);
+}
+
 #[api]
 /// An A or a B - adjacently tagged.
 #[derive(Deserialize, Serialize)]

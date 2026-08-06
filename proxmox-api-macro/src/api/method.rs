@@ -43,6 +43,7 @@ impl TryFrom<JSONValue> for ReturnType {
         Ok(match value {
             JSONValue::Object(obj) => ReturnType::Explicit(obj.try_into()?),
             JSONValue::Expr(ext) => ReturnType::Extern(ext),
+            JSONValue::Array(arr) => bail!(arr.span(), "return type cannot be an array"),
         })
     }
 }

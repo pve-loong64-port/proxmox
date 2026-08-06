@@ -143,6 +143,7 @@ impl Parse for FieldName {
 #[allow(clippy::large_enum_variant)]
 pub enum JSONValue {
     Object(JSONObject),
+    Array(JSONArray),
     Expr(syn::Expr),
 }
 
@@ -153,6 +154,15 @@ impl JSONValue {
         match self {
             JSONValue::Object(s) => Ok(s),
             JSONValue::Expr(e) => bail!(e => "expected {}", expected),
+            JSONValue::Array(e) => bail!(e.span(), "expected {}", expected),
+        }
+    }
+
+    pub fn into_array(self, expected: &str) -> Result<JSONArray, syn::Error> {
+        match self {
+            JSONValue::Array(s) => Ok(s),
+            JSONValue::Expr(e) => bail!(e => "expected {}", expected),
+            JSONValue::Object(e) => bail!(e.span(), "expected {}", expected),
         }
     }
 
@@ -185,6 +195,7 @@ impl JSONValue {
         match self {
             JSONValue::Object(obj) => obj.span(),
             JSONValue::Expr(expr) => expr.span(),
+            JSONValue::Array(arr) => arr.span(),
         }
     }
 }
@@ -195,6 +206,7 @@ impl TryFrom<JSONValue> for syn::Expr {
     fn try_from(value: JSONValue) -> Result<Self, syn::Error> {
         match value {
             JSONValue::Object(s) => bail!(s.span(), "unexpected object"),
+            JSONValue::Array(s) => bail!(s.span(), "unexpected array"),
             JSONValue::Expr(e) => Ok(e),
         }
     }
@@ -290,9 +302,71 @@ impl Parse for JSONValue {
         let lookahead = input.lookahead1();
         Ok(if lookahead.peek(syn::token::Brace) {
             JSONValue::Object(input.parse()?)
+        } else if lookahead.peek(syn::token::Bracket) {
+            JSONValue::Array(input.parse()?)
         } else {
             JSONValue::Expr(input.parse()?)
         })
+    }
+}
+
+/// For `allOf` and `oneOf` schemas we need an array of schema entries.
+pub struct JSONArray {
+    pub bracket_token: Option<syn::token::Bracket>,
+    pub elements: Vec<JSONValue>,
+}
+impl JSONArray {
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
+
+    fn parse_elements(input: ParseStream) -> syn::Result<Vec<JSONValue>> {
+        Ok(input
+            .parse_terminated(JSONValue::parse, Token![,])?
+            .into_iter()
+            .collect())
+    }
+}
+
+impl Parse for JSONArray {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        Ok(Self {
+            bracket_token: Some(syn::bracketed!(content in input)),
+            elements: Self::parse_elements(&content)?,
+        })
+    }
+}
+
+impl std::ops::Deref for JSONArray {
+    type Target = Vec<JSONValue>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.elements
+    }
+}
+
+impl std::ops::DerefMut for JSONArray {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.elements
+    }
+}
+
+impl JSONArray {
+    pub fn span(&self) -> Span {
+        match &self.bracket_token {
+            Some(brace) => brace.span.join(),
+            None => Span::call_site(),
+        }
+    }
+}
+
+impl IntoIterator for JSONArray {
+    type Item = <Vec<JSONValue> as IntoIterator>::Item;
+    type IntoIter = <Vec<JSONValue> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.elements.into_iter()
     }
 }
 

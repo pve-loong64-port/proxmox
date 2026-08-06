@@ -94,6 +94,24 @@ fn test_nvit() {
     assert_eq!(TEST_SCHEMA, Nvit::API_SCHEMA);
 }
 
+#[test]
+fn test_nvit_json_schema_macro() {
+    const TEST_SCHEMA: ::proxmox_schema::Schema = proxmox_api_macro::json_schema! {
+        description: "Name, value, index and text.",
+        allOf: [
+            {
+                description: "Name and value.",
+                properties: {
+                    name: { schema: NAME_SCHEMA },
+                    value: { schema: VALUE_SCHEMA },
+                },
+            },
+            { type: IndexText },
+        ],
+    };
+    assert_eq!(TEST_SCHEMA, Nvit::API_SCHEMA);
+}
+
 #[api(
     properties: {
         nv: { type: NameValue },

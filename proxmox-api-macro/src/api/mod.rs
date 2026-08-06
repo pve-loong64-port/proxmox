@@ -232,6 +232,8 @@ pub enum SchemaItem {
     Number(Span),
     String(Span),
     Object(SchemaObject),
+    AllOf(SchemaAllOf),
+    OneOf(SchemaOneOf),
     Array(SchemaArray),
     ExternType(ExprPath),
     ExternSchema(Expr),
@@ -247,6 +249,8 @@ impl SchemaItem {
             SchemaItem::Number(span) => *span,
             SchemaItem::String(span) => *span,
             SchemaItem::Object(inner) => inner.span,
+            SchemaItem::AllOf(inner) => inner.span,
+            SchemaItem::OneOf(inner) => inner.span,
             SchemaItem::Array(inner) => inner.span,
             SchemaItem::ExternType(inner) => inner.span(),
             SchemaItem::ExternSchema(inner) => inner.span(),
@@ -267,6 +271,10 @@ impl SchemaItem {
             None => {
                 if obj.contains_key("properties") {
                     return Ok(SchemaItem::Object(SchemaObject::try_extract_from(obj)?));
+                } else if obj.contains_key("allOf") {
+                    return Ok(SchemaItem::AllOf(SchemaAllOf::try_extract_from(obj)?));
+                } else if obj.contains_key("oneOf") {
+                    return Ok(SchemaItem::OneOf(SchemaOneOf::try_extract_from(obj)?));
                 } else if obj.contains_key("items") {
                     return Ok(SchemaItem::Array(SchemaArray::try_extract_from(obj)?));
                 } else {
@@ -302,6 +310,10 @@ impl SchemaItem {
             Ok(SchemaItem::String(ty.span()))
         } else if name == "Object" {
             Ok(SchemaItem::Object(SchemaObject::try_extract_from(obj)?))
+        } else if name == "AllOf" {
+            Ok(SchemaItem::AllOf(SchemaAllOf::try_extract_from(obj)?))
+        } else if name == "OneOf" {
+            Ok(SchemaItem::OneOf(SchemaOneOf::try_extract_from(obj)?))
         } else if name == "Array" {
             Ok(SchemaItem::Array(SchemaArray::try_extract_from(obj)?))
         } else {
@@ -372,6 +384,35 @@ impl SchemaItem {
                         .property_aliases(&[#( #pairs ),*])
                     });
                 }
+            }
+            SchemaItem::AllOf(all_of) => {
+                let description = check_description()?;
+                let mut list = TokenStream::new();
+                all_of.to_schema_inner(&mut list)?;
+                ts.extend(quote_spanned! { all_of.span =>
+                    ::proxmox_schema::AllOfSchema::new(#description, &[#list])
+                });
+            }
+            SchemaItem::OneOf(one_of) => {
+                let description = check_description()?;
+
+                let type_property = &one_of.type_property;
+
+                let mut type_property_schema = TokenStream::new();
+                one_of
+                    .type_property_schema
+                    .to_schema(&mut type_property_schema)?;
+
+                let mut list = TokenStream::new();
+                one_of.to_schema_inner(&mut list)?;
+
+                ts.extend(quote_spanned! { one_of.span =>
+                    ::proxmox_schema::OneOfSchema::new(
+                        #description,
+                        &(#type_property, false, &#type_property_schema),
+                        &[#list],
+                    )
+                });
             }
             SchemaItem::Array(array) => {
                 let description = check_description()?;
@@ -768,6 +809,116 @@ impl SchemaObject {
     fn extend_properties(&mut self, new_fields: Vec<ObjectEntry>) {
         self.properties_.extend(new_fields);
         self.sort_properties();
+    }
+}
+
+#[derive(Clone)]
+/// Contains a list of subschemas which must be object schemas.
+pub struct SchemaAllOf {
+    span: Span,
+    list: Vec<Schema>,
+}
+
+impl SchemaAllOf {
+    /*
+    pub fn new(span: Span) -> Self {
+        Self {
+            span,
+            list: Vec::new(),
+        }
+    }
+    */
+
+    fn to_schema_inner(&self, ts: &mut TokenStream) -> Result<(), syn::Error> {
+        for schema in &self.list {
+            ts.extend(quote! { & });
+            schema.to_schema(ts)?;
+            ts.extend(quote! { , });
+        }
+        Ok(())
+    }
+
+    fn try_extract_from(obj: &mut JSONObject) -> Result<Self, syn::Error> {
+        Ok(Self {
+            span: obj.span(),
+            list: obj
+                .remove_required_element("allOf")?
+                .into_array("array of schema entries")?
+                .into_iter()
+                .try_fold(Vec::new(), |mut acc, item| {
+                    acc.push(item.try_into()?);
+                    Ok::<_, syn::Error>(acc)
+                })?,
+        })
+    }
+}
+
+#[derive(Clone)]
+/// Contains a list of subschemas which must be object schemas.
+pub struct SchemaOneOf {
+    span: Span,
+    type_property: syn::LitStr,
+    type_property_schema: Box<Schema>,
+    list: Vec<(syn::LitStr, Schema)>,
+}
+
+impl SchemaOneOf {
+    /*
+    pub fn new(span: Span, type_property: syn::LitStr, type_property_schema: Schema) -> Self {
+        Self {
+            span,
+            type_property,
+            type_property_schema: Box::new(type_property_schema),
+            list: Vec::new(),
+        }
+    }
+    */
+
+    fn to_schema_inner(&self, ts: &mut TokenStream) -> Result<(), syn::Error> {
+        for entry in &self.list {
+            let variant = &entry.0;
+            let mut schema = TokenStream::new();
+            entry.1.to_schema(&mut schema)?;
+            ts.extend(quote! { ( #variant, &#schema ), });
+        }
+        Ok(())
+    }
+
+    fn sort_variants(&mut self) {
+        self.list.sort_by(|a, b| (a.0.value()).cmp(&b.0.value()));
+    }
+
+    fn try_extract_from(obj: &mut JSONObject) -> Result<Self, syn::Error> {
+        let type_property: syn::LitStr =
+            obj.remove_required_element("type-property")?.try_into()?;
+
+        let type_property_schema: Schema = obj
+            .remove_required_element("type-property-schema")?
+            .try_into()?;
+
+        let mut list = Vec::new();
+        for item in obj
+            .remove_required_element("oneOf")?
+            .into_array("array of oneOf schema variants")?
+        {
+            let mut obj = item.into_object("oneOf schema entry")?;
+
+            let instance_type: syn::LitStr =
+                obj.remove_required_element("instance-type")?.try_into()?;
+
+            let schema: Schema = obj.try_into()?;
+
+            list.push((instance_type, schema));
+        }
+
+        let mut this = Self {
+            span: obj.span(),
+            type_property,
+            type_property_schema: Box::new(type_property_schema),
+            list,
+        };
+        this.sort_variants();
+        Ok(this)
     }
 }
 
