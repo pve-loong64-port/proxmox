@@ -337,7 +337,7 @@ fn log_response(
     let path = &path_query[..MAX_URI_QUERY_LENGTH.min(path_query.len())];
 
     let status = resp.status();
-    if !(status.is_success() || status.is_informational()) {
+    if status.is_client_error() || status.is_server_error() {
         let reason = status.canonical_reason().unwrap_or("unknown reason");
 
         let message = match resp.extensions().get::<ErrorMessageExtension>() {
