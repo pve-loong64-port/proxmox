@@ -13,11 +13,9 @@ use proxmox_schema::{ObjectSchemaType, Schema};
 type Object = serde_json::Map<String, Value>;
 
 fn object_schema(schema: &'static Schema) -> Result<&'static dyn ObjectSchemaType, Error> {
-    Ok(match schema {
-        Schema::Object(schema) => schema,
-        Schema::AllOf(schema) => schema,
-        _ => bail!("invalid schema for config, must be an object schema"),
-    })
+    schema
+        .any_object()
+        .ok_or_else(|| format_err!("invalid schema for config, must be an object schema"))
 }
 
 /// Parse a full string representing a config file.
