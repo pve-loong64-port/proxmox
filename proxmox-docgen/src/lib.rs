@@ -4,6 +4,9 @@ use proxmox_router::{ApiAccess, ApiHandler, ApiMethod, Permission, Router, SubRo
 use proxmox_schema::format::get_property_string_type_text;
 use proxmox_schema::{ApiStringFormat, ObjectSchemaType, Schema};
 
+mod json_output;
+pub use json_output::{dump_json_properties, json_type_text};
+
 /// Generate a `sede_json::Value` that represents an API in a tree-like structure.
 ///
 /// - `router`: Specifies to root `Router` of the API that should be dumped.
