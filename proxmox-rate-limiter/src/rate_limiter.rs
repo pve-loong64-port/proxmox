@@ -220,6 +220,96 @@ impl RateLimiterVec {
 mod tests {
     use super::*;
 
+    const SECOND: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn empty_bucket_delays_until_tokens_are_available() {
+        let start = Instant::now();
+        // 1000 tokens/s, no burst allowance
+        let mut limiter = RateLimiter::with_start_time(1000, 0, start);
+
+        assert_eq!(limiter.register_traffic(start, 500), SECOND / 2);
+        assert_eq!(limiter.traffic(), 500);
+    }
+
+    #[test]
+    fn burst_up_to_the_bucket_size_is_not_delayed() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::with_start_time(1000, 1000, start);
+
+        // the bucket starts out empty, so it first has to fill up
+        assert_eq!(
+            limiter.register_traffic(start + SECOND, 1000),
+            TbfState::NO_DELAY
+        );
+        // .. and is empty again afterwards
+        assert_eq!(limiter.register_traffic(start + SECOND, 1000), SECOND);
+    }
+
+    #[test]
+    fn a_rate_of_zero_never_delays() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::with_start_time(0, 0, start);
+
+        assert_eq!(
+            limiter.register_traffic(start, u64::MAX),
+            TbfState::NO_DELAY
+        );
+        // the refill runs with a rate of zero here, it must not try to divide by it
+        assert_eq!(
+            limiter.register_traffic(start + SECOND, 1),
+            TbfState::NO_DELAY
+        );
+    }
+
+    #[test]
+    fn time_going_backwards_does_not_refill() {
+        let start = Instant::now() + SECOND;
+        let mut limiter = RateLimiter::with_start_time(1000, 0, start);
+
+        assert_eq!(limiter.register_traffic(start, 1000), SECOND);
+        assert_eq!(limiter.register_traffic(start - SECOND, 0), SECOND);
+    }
+
+    #[test]
+    fn traffic_accounting_is_not_affected_by_the_bucket() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::with_start_time(1000, 10_000, start);
+
+        limiter.register_traffic(start, 1000);
+        limiter.register_traffic(start + SECOND, 2000);
+        assert_eq!(limiter.traffic(), 3000);
+    }
+
+    #[test]
+    fn shrinking_the_bucket_clamps_the_consumed_tokens() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::with_start_time(1000, 10_000, start);
+
+        // fill the bucket, then consume all of it plus 1000 tokens
+        limiter.register_traffic(start + SECOND * 10, 11_000);
+        limiter.update_rate(1000, 100);
+
+        // the outstanding tokens got clamped to the new bucket size, no delay is left over
+        assert_eq!(
+            limiter.register_traffic(start + SECOND * 10, 0),
+            TbfState::NO_DELAY
+        );
+    }
+
+    #[test]
+    fn vec_rejects_out_of_range_indices() {
+        let start = Instant::now();
+        let mut limiter = RateLimiterVec::with_start_time(2, 1000, 0, start);
+
+        assert_eq!(limiter.len(), 2);
+        assert!(limiter.traffic(2).is_err());
+        assert!(limiter.register_traffic(2, start, 1).is_err());
+        assert!(limiter.register_traffic(1, start, 1).is_ok());
+        assert_eq!(limiter.traffic(0).unwrap(), 0);
+        assert_eq!(limiter.traffic(1).unwrap(), 1);
+    }
+
     #[test]
     fn counters_saturate_instead_of_wrapping() {
         let start = Instant::now();
