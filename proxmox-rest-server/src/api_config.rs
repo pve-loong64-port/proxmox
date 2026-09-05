@@ -56,7 +56,11 @@ pub struct ApiConfig {
     ///
     /// As clients control headers of requests and the real IP is used in logs, it might be desired
     /// to lock down the sources to the networks and or proxies you control.
-    /// If
+    ///
+    /// If this is not set, the [`real_ip_header`] is honored for every peer, which means any
+    /// client that can reach the server can choose the address its requests are attributed to,
+    /// including the `rhost` of failed-authentication log entries that tools like fail2ban act
+    /// on. Only leave it unset if the server is not reachable except through a trusted proxy.
     pub(crate) real_ip_allow_from: Option<Vec<Cidr>>,
 
     #[cfg(feature = "templates")]
