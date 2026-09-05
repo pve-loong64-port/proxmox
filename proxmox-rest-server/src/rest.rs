@@ -1189,7 +1189,7 @@ async fn handle_static_file_download(
 // FIXME: support handling multiple compression methods
 fn extract_compression_method(headers: &http::HeaderMap) -> Option<CompressionMethod> {
     if let Some(Ok(encodings)) = headers.get(header::ACCEPT_ENCODING).map(|v| v.to_str()) {
-        for encoding in encodings.split(&[',', ' '][..]) {
+        for encoding in encodings.split(',') {
             if let Ok(method) = encoding.parse() {
                 return Some(method);
             }
@@ -1754,6 +1754,17 @@ mod tests {
             None
         );
         assert_eq!(extract_compression_method(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn compression_weights_are_not_split_from_their_coding() {
+        for value in ["deflate ;q=0", "deflate; q=0", "gzip, deflate ; q = 0"] {
+            assert_eq!(
+                extract_compression_method(&headers("accept-encoding", value)),
+                None,
+                "accepted {value}"
+            );
+        }
     }
 
     #[test]
