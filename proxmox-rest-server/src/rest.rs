@@ -1,10 +1,11 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::BuildHasher;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use anyhow::{Error, bail, format_err};
@@ -19,7 +20,6 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn;
 use hyper_util::server::graceful;
 use hyper_util::service::TowerToHyperService;
-use regex::Regex;
 use serde_json::Value;
 use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -391,18 +391,118 @@ fn get_proxied_peer(
     }
 
     if real_ip_header.eq_ignore_ascii_case("FORWARDED") {
-        static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"for="([^"]+)""#).unwrap());
-        let forwarded = headers.get(header::FORWARDED)?.to_str().ok()?;
-        let capture = RE.captures(forwarded)?;
-        let val = capture.get(1)?.as_str();
-        return val.parse().ok();
+        // multiple header lines are equivalent to one comma separated list, so the trusted
+        // element is in the last of them
+        let forwarded = headers
+            .get_all(header::FORWARDED)
+            .iter()
+            .next_back()?
+            .to_str()
+            .ok()?;
+        return parse_peer_address(&forwarded_for(forwarded)?);
     }
 
     let value = headers.get(real_ip_header.as_str())?.to_str().ok()?;
-    value.parse::<std::net::SocketAddr>().ok().or_else(|| {
-        let ip: std::net::IpAddr = value.trim().parse().ok()?;
-        Some(std::net::SocketAddr::new(ip, 0))
-    })
+    parse_peer_address(value)
+}
+
+/// Extract the `for` parameter from the last element of an RFC 7239 `Forwarded` header.
+///
+/// Proxies append their own element, so the last one was added by the proxy we are talking to,
+/// which is the only one that can be trusted; everything in front of it is controlled by whoever
+/// talked to that proxy. Delimiters inside a quoted value separate nothing, so the header has to
+/// be scanned rather than split.
+fn forwarded_for(header: &str) -> Option<Cow<'_, str>> {
+    let element = split_unquoted(header, ',')?.pop()?;
+
+    for parameter in split_unquoted(element, ';')? {
+        let Some((name, value)) = parameter.split_once('=') else {
+            continue;
+        };
+
+        if name.trim().eq_ignore_ascii_case("for") {
+            return Some(unquote(value.trim()));
+        }
+    }
+
+    None
+}
+
+/// Split at every occurrence of `delimiter` that is not inside a quoted string.
+///
+/// Returns `None` if a quoted string or an escape is left open, since the delimiters behind it
+/// cannot be placed: a peer that gets its value appended to could otherwise hide the delimiter in
+/// front of the element a proxy adds and have its own element read as the last one.
+fn split_unquoted(value: &str, delimiter: char) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+
+    for (index, c) in value.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if quoted && c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            quoted = !quoted;
+        } else if c == delimiter && !quoted {
+            parts.push(&value[start..index]);
+            start = index + c.len_utf8();
+        }
+    }
+    if quoted || escaped {
+        return None;
+    }
+    parts.push(&value[start..]);
+
+    Some(parts)
+}
+
+/// Strip the quotes off a quoted string and resolve its escapes.
+fn unquote(value: &str) -> Cow<'_, str> {
+    let Some(inner) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return Cow::Borrowed(value);
+    };
+
+    if !inner.contains('\\') {
+        return Cow::Borrowed(inner);
+    }
+
+    let mut out = String::with_capacity(inner.len());
+    let mut escaped = false;
+    for c in inner.chars() {
+        if escaped || c != '\\' {
+            out.push(c);
+            escaped = false;
+        } else {
+            escaped = true;
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// Parse a peer address, accepting `<ip>:<port>` as well as a bare, optionally bracketed, `<ip>`.
+///
+/// RFC 7239 leaves the port optional and requires brackets around IPv6 addresses, so a peer that
+/// comes without a port is reported with port 0.
+fn parse_peer_address(value: &str) -> Option<std::net::SocketAddr> {
+    let value = value.trim();
+
+    if let Ok(addr) = value.parse::<std::net::SocketAddr>() {
+        return Some(addr);
+    }
+
+    let value = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(value);
+
+    Some(std::net::SocketAddr::new(value.parse().ok()?, 0))
 }
 
 fn get_user_agent(headers: &HeaderMap) -> Option<String> {
@@ -1351,6 +1451,26 @@ mod tests {
         headers
     }
 
+    fn peer() -> std::net::SocketAddr {
+        "192.0.2.1:1234".parse().unwrap()
+    }
+
+    fn config(real_ip_header: &str, allow_from: &[&str]) -> ApiConfig {
+        let config = ApiConfig::new(".", RpcEnvironmentType::PUBLIC)
+            .real_ip_header(real_ip_header.to_string());
+
+        if allow_from.is_empty() {
+            config
+        } else {
+            config.real_ip_allow_from(
+                allow_from
+                    .iter()
+                    .map(|cidr| cidr.parse().unwrap())
+                    .collect(),
+            )
+        }
+    }
+
     struct TestUser;
 
     impl UserInformation for TestUser {
@@ -1424,6 +1544,153 @@ mod tests {
         };
 
         authorize_request(router, &[], &context, rpcenv).await
+    }
+
+    #[test]
+    fn without_a_configured_header_the_socket_peer_is_used() {
+        // the public environment does not trust any header by default
+        let config = ApiConfig::new(".", RpcEnvironmentType::PUBLIC);
+        let headers = headers("forwarded", r#"for="198.51.100.7:443""#);
+
+        assert_eq!(get_proxied_peer(&headers, &config, &peer()), None);
+    }
+
+    #[test]
+    fn forwarded_accepts_the_shapes_allowed_by_rfc_7239() {
+        let config = config("Forwarded", &[]);
+
+        for (header, expected) in [
+            (r#"for="198.51.100.7:443""#, "198.51.100.7:443"),
+            (r#"for=198.51.100.7"#, "198.51.100.7:0"),
+            (r#"For="198.51.100.7""#, "198.51.100.7:0"),
+            (
+                r#"by=203.0.113.1;for=198.51.100.7;proto=https"#,
+                "198.51.100.7:0",
+            ),
+            (r#"for="[2001:db8::1]:8443""#, "[2001:db8::1]:8443"),
+            (r#"for="[2001:db8::1]""#, "[2001:db8::1]:0"),
+        ] {
+            let expected: std::net::SocketAddr = expected.parse().unwrap();
+            assert_eq!(
+                get_proxied_peer(&headers("forwarded", header), &config, &peer()),
+                Some(expected),
+                "failed for {header}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_forwarded_header_falls_back_to_the_socket_peer() {
+        let config = config("Forwarded", &[]);
+
+        for header in [
+            r#"for="not-an-address""#,
+            "proto=https",
+            "for=",
+            // the element the trusted proxy appended carries no `for` at all
+            "for=198.51.100.7, proto=https",
+            // an unclosed quote swallows the comma the proxy put in front of its own element,
+            // so the header cannot be split and must not be guessed at
+            r#"for=198.51.100.7;ext="unterminated, for=203.0.113.5"#,
+            r#"for=198.51.100.7;ext="a\, for=203.0.113.5"#,
+            // a dangling escape inside a quoted value leaves the same question open
+            r#"for=198.51.100.7;ext="a\"#,
+        ] {
+            assert_eq!(
+                get_proxied_peer(&headers("forwarded", header), &config, &peer()),
+                None,
+                "failed for {header}"
+            );
+        }
+    }
+
+    #[test]
+    fn forwarded_only_reads_the_for_of_the_last_element() {
+        let config = config("Forwarded", &[]);
+
+        for (header, expected) in [
+            // proxies append, so only the last element was added by the proxy we trust; the one
+            // in front of it is whatever the client sent and must not win
+            ("for=198.51.100.7, for=203.0.113.5", Some("203.0.113.5:0")),
+            // a `for=` inside another parameter's value is not the `for` parameter
+            (
+                r#"host="my-for=1.2.3.4";for=203.0.113.5"#,
+                Some("203.0.113.5:0"),
+            ),
+            (r#"by="for=1.2.3.4";for=203.0.113.5"#, Some("203.0.113.5:0")),
+            // and neither is an extension parameter that merely ends in "for"
+            ("x-for=1.2.3.4", None),
+            // delimiters inside a quoted value separate nothing
+            (
+                r#"ext="x;for=198.51.100.7;y";for=203.0.113.5"#,
+                Some("203.0.113.5:0"),
+            ),
+            (
+                r#"ext="a,for=198.51.100.7";for=203.0.113.5"#,
+                Some("203.0.113.5:0"),
+            ),
+            // an escaped quote does not end the quoted value
+            (
+                r#"ext="a\";for=198.51.100.7;b";for=203.0.113.5"#,
+                Some("203.0.113.5:0"),
+            ),
+        ] {
+            let expected = expected.map(|addr| addr.parse::<std::net::SocketAddr>().unwrap());
+            assert_eq!(
+                get_proxied_peer(&headers("forwarded", header), &config, &peer()),
+                expected,
+                "failed for {header}"
+            );
+        }
+    }
+
+    #[test]
+    fn forwarded_uses_the_last_header_line() {
+        let config = config("Forwarded", &[]);
+        let mut headers = headers("forwarded", "for=198.51.100.7");
+        headers.append("forwarded", "for=203.0.113.5".parse().unwrap());
+
+        assert_eq!(
+            get_proxied_peer(&headers, &config, &peer()),
+            Some("203.0.113.5:0".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn a_custom_header_may_omit_the_port() {
+        let config = config("X-Forwarded-For", &[]);
+
+        assert_eq!(
+            get_proxied_peer(
+                &headers("x-forwarded-for", "198.51.100.7"),
+                &config,
+                &peer()
+            ),
+            Some("198.51.100.7:0".parse().unwrap())
+        );
+        assert_eq!(
+            get_proxied_peer(
+                &headers("x-forwarded-for", "198.51.100.7:443"),
+                &config,
+                &peer()
+            ),
+            Some("198.51.100.7:443".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn a_header_from_an_untrusted_peer_is_ignored() {
+        let config = config("X-Forwarded-For", &["10.0.0.0/8"]);
+        let headers = headers("x-forwarded-for", "198.51.100.7");
+
+        // 192.0.2.1 is not part of the trusted network, so it must not get to pick its own IP
+        assert_eq!(get_proxied_peer(&headers, &config, &peer()), None);
+
+        let trusted = "10.1.2.3:1234".parse().unwrap();
+        assert_eq!(
+            get_proxied_peer(&headers, &config, &trusted),
+            Some("198.51.100.7:0".parse().unwrap())
+        );
     }
 
     #[test]

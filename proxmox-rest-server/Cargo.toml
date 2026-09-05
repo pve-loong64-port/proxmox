@@ -27,7 +27,6 @@ log.workspace = true
 nix.workspace = true
 openssl.workspace = true
 percent-encoding.workspace = true
-regex.workspace = true
 serde = { workspace = true, features = [ "derive" ] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "signal", "process"] }
