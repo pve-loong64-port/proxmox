@@ -86,10 +86,12 @@ pub fn read_pid(pid_fn: &str) -> Result<i32, Error> {
 /// We assume cookie_name is already url encoded.
 pub fn extract_cookie(cookie: &str, cookie_name: &str) -> Option<String> {
     for pair in cookie.split(';') {
-        let (name, value) = match pair.find('=') {
-            Some(i) => (pair[..i].trim(), pair[(i + 1)..].trim()),
-            None => return None, // Cookie format error
+        // skip anything that is not a `name=value` pair instead of giving up on the whole header,
+        // a single bogus cookie must not hide the one we are looking for
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
         };
+        let (name, value) = (name.trim(), value.trim());
 
         if name == cookie_name {
             use percent_encoding::percent_decode;
@@ -217,5 +219,46 @@ mod tests {
 
         assert_eq!(path, "/api2/json");
         assert_eq!(components, ["api2", "json"]);
+    }
+
+    #[test]
+    fn cookies_are_looked_up_by_exact_name() {
+        let cookie = "foo=1; PBSAuthCookie=ticket; foobar=2";
+
+        assert_eq!(
+            extract_cookie(cookie, "PBSAuthCookie"),
+            Some("ticket".to_string())
+        );
+        assert_eq!(extract_cookie(cookie, "AuthCookie"), None);
+        assert_eq!(extract_cookie(cookie, "foo"), Some("1".to_string()));
+    }
+
+    #[test]
+    fn cookie_values_are_percent_decoded() {
+        assert_eq!(
+            extract_cookie("PBSAuthCookie=PBS%3Aroot%40pam%3A1234", "PBSAuthCookie"),
+            Some("PBS:root@pam:1234".to_string())
+        );
+    }
+
+    #[test]
+    fn a_bogus_pair_does_not_hide_later_cookies() {
+        assert_eq!(
+            extract_cookie("bogus; PBSAuthCookie=ticket", "PBSAuthCookie"),
+            Some("ticket".to_string())
+        );
+        assert_eq!(extract_cookie("", "PBSAuthCookie"), None);
+    }
+
+    #[test]
+    fn cookies_are_read_from_the_header_map() {
+        let mut headers = http::HeaderMap::new();
+        assert_eq!(cookie_from_header(&headers, "PBSAuthCookie"), None);
+
+        headers.insert("cookie", "PBSAuthCookie=ticket".parse().unwrap());
+        assert_eq!(
+            cookie_from_header(&headers, "PBSAuthCookie"),
+            Some("ticket".to_string())
+        );
     }
 }
