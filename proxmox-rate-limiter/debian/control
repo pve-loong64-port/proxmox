@@ -56,6 +56,7 @@ Multi-Arch: same
 Depends:
  ${misc:Depends},
  librust-proxmox-rate-limiter-dev (= ${binary:Version}),
+ librust-proxmox-rate-limiter+rate-limiter-dev (= ${binary:Version}),
  librust-nix-0.29+default-dev,
  librust-proxmox-shared-memory-1+default-dev (>= 1.0.1-~~),
  librust-proxmox-sys-1+default-dev (>= 1.0.1-~~)

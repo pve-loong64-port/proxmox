@@ -23,6 +23,7 @@ proxmox-sys = { workspace = true, optional = true }
 default = []
 rate-limiter = ["dep:hyper"]
 shared-rate-limiter = [
+    "rate-limiter",
     "dep:nix",
     "dep:proxmox-shared-memory",
     "dep:proxmox-sys",
