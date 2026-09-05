@@ -82,6 +82,9 @@ const MAX_REQUEST_BODY_SIZE: usize = 512 * 1024;
 
 const CHUNK_SIZE_LIMIT: u64 = 32 * 1024;
 
+/// HTTP authority for forwarded requests; without a custom connector, it is also the destination.
+const DEFAULT_PRIVILEGED_AUTHORITY: &str = "127.0.0.1:82";
+
 impl RestServer {
     /// Creates a new instance.
     pub fn new(api_config: ApiConfig) -> Self {
@@ -602,7 +605,9 @@ async fn proxy_protected_request(
     let mut uri_parts = parts.uri.clone().into_parts();
 
     uri_parts.scheme = Some(http::uri::Scheme::HTTP);
-    uri_parts.authority = Some(http::uri::Authority::from_static("127.0.0.1:82"));
+    uri_parts.authority = Some(http::uri::Authority::from_static(
+        DEFAULT_PRIVILEGED_AUTHORITY,
+    ));
     let new_uri = http::Uri::from_parts(uri_parts).unwrap();
 
     parts.uri = new_uri;
