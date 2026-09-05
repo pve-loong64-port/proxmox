@@ -34,7 +34,7 @@ use proxmox_http::{RateLimiterTag, RateLimiterTagsHandle};
 #[cfg(not(feature = "rate-limited-stream"))]
 type RateLimiterTagsHandle = ();
 use proxmox_router::{
-    ApiHandler, ApiMethod, HttpError, Permission, RpcEnvironment, RpcEnvironmentType,
+    ApiHandler, ApiMethod, HttpError, Permission, Router, RpcEnvironment, RpcEnvironmentType,
     UserInformation, check_api_permission,
 };
 use proxmox_router::{http_bail, http_err};
@@ -640,6 +640,131 @@ async fn proxy_protected_request(
     Ok(resp.map(|b| Body::wrap_stream(BodyDataStream::new(b))))
 }
 
+/// Set the rate limiter tags for the current request, if the peer is rate limited at all.
+#[cfg(feature = "rate-limited-stream")]
+fn set_rate_limit_user(handle: Option<&RateLimiterTagsHandle>, auth_id: Option<&str>) {
+    if let Some(handle) = handle {
+        handle.set_tags(match auth_id {
+            Some(auth_id) => vec![RateLimiterTag::User(auth_id.to_string())],
+            None => Vec::new(),
+        });
+    }
+}
+
+#[cfg(not(feature = "rate-limited-stream"))]
+fn set_rate_limit_user(_handle: Option<&RateLimiterTagsHandle>, _auth_id: Option<&str>) {}
+
+/// Why a request got rejected before it could be dispatched to its API method.
+///
+/// The formatted and the unformatted endpoint render these differently, but everything leading up
+/// to them has to stay identical, which is why the checks live in [`authorize_request`].
+enum RequestError {
+    /// Authentication is required for this method, but did not succeed.
+    Unauthorized(Error),
+    /// No API method is registered for this path and HTTP method.
+    NotFound(Error),
+    /// The API method exists, but the authenticated user must not call it.
+    Forbidden(Error),
+}
+
+impl From<RequestError> for Error {
+    fn from(err: RequestError) -> Self {
+        match err {
+            RequestError::Unauthorized(err)
+            | RequestError::NotFound(err)
+            | RequestError::Forbidden(err) => err,
+        }
+    }
+}
+
+/// Everything the shared authorization path needs besides the router and the path itself.
+struct RequestContext<'a> {
+    parts: &'a Parts,
+    config: &'a ApiConfig,
+    full_path: &'a str,
+    rate_limit_tags: Option<&'a RateLimiterTagsHandle>,
+}
+
+/// Look up the API method for a request and run the authentication and permission checks.
+///
+/// On success the authenticated user is recorded in `rpcenv` and the path parameters collected
+/// while routing are returned together with the method.
+async fn authorize_request(
+    router: &'static Router,
+    path_components: &[&str],
+    request: &RequestContext<'_>,
+    rpcenv: &mut RestEnvironment,
+) -> Result<(&'static ApiMethod, HashMap<String, String>), RequestError> {
+    let mut uri_param = HashMap::new();
+    let api_method = router.find_method(
+        path_components,
+        request.parts.method.clone(),
+        &mut uri_param,
+    );
+
+    // no auth for endpoints with World permission
+    let auth_required = match api_method {
+        Some(api_method) => !matches!(api_method.access.permission, Permission::World),
+        None => true,
+    };
+
+    let user_info: Box<dyn UserInformation + Send + Sync> = if auth_required {
+        match request
+            .config
+            .check_auth(&request.parts.headers, &request.parts.method)
+            .await
+        {
+            Ok((authid, info)) => {
+                set_rate_limit_user(request.rate_limit_tags, Some(&authid));
+                rpcenv.set_auth_id(Some(authid));
+                info
+            }
+            Err(auth_err) => {
+                set_rate_limit_user(request.rate_limit_tags, None);
+                let err = match auth_err {
+                    AuthError::Generic(err) => err,
+                    AuthError::NoData => format_err!("no authentication credentials provided."),
+                };
+                // fixme: log Username??
+                rpcenv.log_failed_auth(None, &err.to_string());
+
+                // always delay unauthorized calls by 3 seconds (from start of request)
+                tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
+                return Err(RequestError::Unauthorized(http_err!(
+                    UNAUTHORIZED,
+                    "authentication failed"
+                )));
+            }
+        }
+    } else {
+        set_rate_limit_user(request.rate_limit_tags, None);
+        Box::new(EmptyUserInformation {})
+    };
+
+    let Some(api_method) = api_method else {
+        return Err(RequestError::NotFound(http_err!(
+            NOT_FOUND,
+            "Path '{}' not found.",
+            request.full_path
+        )));
+    };
+
+    if !check_api_permission(
+        api_method.access.permission,
+        rpcenv.get_auth_id().as_deref(),
+        &uri_param,
+        user_info.as_ref(),
+    ) {
+        tokio::time::sleep_until(Instant::from_std(access_forbidden_time())).await;
+        return Err(RequestError::Forbidden(http_err!(
+            FORBIDDEN,
+            "permission check failed"
+        )));
+    }
+
+    Ok((api_method, uri_param))
+}
+
 fn delay_unauth_time() -> std::time::Instant {
     std::time::Instant::now() + std::time::Duration::from_millis(3000)
 }
@@ -958,7 +1083,6 @@ impl ApiConfig {
         self: Arc<ApiConfig>,
         req: Request<Incoming>,
         peer: &std::net::SocketAddr,
-        #[cfg_attr(not(feature = "rate-limited-stream"), allow(unused_variables))]
         rate_limit_tags: Option<RateLimiterTagsHandle>,
     ) -> Result<Response<Body>, Error> {
         let (parts, body) = req.into_parts();
@@ -990,7 +1114,6 @@ impl ApiConfig {
                     full_path: &path,
                     relative_path_components,
                     rpcenv,
-                    #[cfg(feature = "rate-limited-stream")]
                     rate_limit_tags: rate_limit_tags.clone(),
                 })
                 .await;
@@ -1003,27 +1126,15 @@ impl ApiConfig {
         if components.is_empty() {
             match self.check_auth(&parts.headers, &method).await {
                 Ok((auth_id, _user_info)) => {
-                    rpcenv.set_auth_id(Some(auth_id.clone()));
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(vec![RateLimiterTag::User(auth_id)]);
-                    }
+                    set_rate_limit_user(rate_limit_tags.as_ref(), Some(&auth_id));
+                    rpcenv.set_auth_id(Some(auth_id));
                     return Ok(self.get_index(rpcenv, parts).await);
                 }
                 Err(AuthError::Generic(_)) => {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(Vec::new());
-                    }
+                    set_rate_limit_user(rate_limit_tags.as_ref(), None);
                     tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
                 }
-                Err(AuthError::NoData) =>
-                {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(Vec::new());
-                    }
-                }
+                Err(AuthError::NoData) => set_rate_limit_user(rate_limit_tags.as_ref(), None),
             }
             Ok(self.get_index(rpcenv, parts).await)
         } else {
@@ -1091,7 +1202,6 @@ pub struct ApiRequestData<'a> {
     full_path: &'a str,
     relative_path_components: &'a [&'a str],
     rpcenv: RestEnvironment,
-    #[cfg(feature = "rate-limited-stream")]
     rate_limit_tags: Option<RateLimiterTagsHandle>,
 }
 
@@ -1110,7 +1220,6 @@ impl Formatted {
             full_path,
             relative_path_components,
             mut rpcenv,
-            #[cfg(feature = "rate-limited-stream")]
             rate_limit_tags,
         }: ApiRequestData<'_>,
     ) -> Result<Response<Body>, Error> {
@@ -1126,102 +1235,49 @@ impl Formatted {
             _ => bail!("Unsupported output format '{}'.", format),
         };
 
-        let mut uri_param = HashMap::new();
-        let api_method = self.router.find_method(
+        let context = RequestContext {
+            parts: &parts,
+            config,
+            full_path,
+            rate_limit_tags: rate_limit_tags.as_ref(),
+        };
+
+        let (api_method, uri_param) = match authorize_request(
+            self.router,
             &relative_path_components[1..],
-            parts.method.clone(),
-            &mut uri_param,
-        );
-
-        let mut auth_required = true;
-        if let Some(api_method) = api_method {
-            if let Permission::World = *api_method.access.permission {
-                auth_required = false; // no auth for endpoints with World permission
+            &context,
+            &mut rpcenv,
+        )
+        .await
+        {
+            Ok(resolved) => resolved,
+            // an unauthenticated caller gets a bare 401, it must not learn anything else
+            Err(err @ RequestError::Unauthorized(_)) => return Err(err.into()),
+            Err(err @ (RequestError::NotFound(_) | RequestError::Forbidden(_))) => {
+                return Ok(formatter.format_error(err.into()));
             }
-        }
+        };
 
-        let mut user_info: Box<dyn UserInformation + Send + Sync> =
-            Box::new(EmptyUserInformation {});
+        let auth_id = rpcenv.get_auth_id();
 
-        if auth_required {
-            match config.check_auth(&parts.headers, &parts.method).await {
-                Ok((authid, info)) => {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(vec![RateLimiterTag::User(authid.clone())]);
-                    }
-                    rpcenv.set_auth_id(Some(authid));
-                    user_info = info;
-                }
-                Err(auth_err) => {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(Vec::new());
-                    }
-                    let err = match auth_err {
-                        AuthError::Generic(err) => err,
-                        AuthError::NoData => {
-                            format_err!("no authentication credentials provided.")
-                        }
-                    };
-                    // fixme: log Username??
-                    rpcenv.log_failed_auth(None, &err.to_string());
-
-                    // always delay unauthorized calls by 3 seconds (from start of request)
-                    tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
-                    return Err(http_err!(UNAUTHORIZED, "authentication failed"));
-                }
-            }
+        let result = if api_method.protected && rpcenv.env_type == RpcEnvironmentType::PUBLIC {
+            proxy_protected_request(config, api_method, parts, body, peer).await
         } else {
-            #[cfg(feature = "rate-limited-stream")]
-            if let Some(handle) = rate_limit_tags.as_ref() {
-                handle.set_tags(Vec::new());
-            }
+            handle_api_request(rpcenv, api_method, Some(formatter), parts, body, uri_param).await
+        };
+
+        let mut response = match result {
+            Ok(resp) => resp,
+            Err(err) => formatter.format_error(err),
+        };
+
+        if let Some(auth_id) = auth_id {
+            response
+                .extensions_mut()
+                .insert(AuthStringExtension(auth_id));
         }
 
-        match api_method {
-            None => {
-                let err = http_err!(NOT_FOUND, "Path '{}' not found.", full_path);
-                Ok(formatter.format_error(err))
-            }
-            Some(api_method) => {
-                let auth_id = rpcenv.get_auth_id();
-                let user_info = user_info;
-
-                if !check_api_permission(
-                    api_method.access.permission,
-                    auth_id.as_deref(),
-                    &uri_param,
-                    user_info.as_ref(),
-                ) {
-                    let err = http_err!(FORBIDDEN, "permission check failed");
-                    tokio::time::sleep_until(Instant::from_std(access_forbidden_time())).await;
-                    return Ok(formatter.format_error(err));
-                }
-
-                let result = if api_method.protected
-                    && rpcenv.env_type == RpcEnvironmentType::PUBLIC
-                {
-                    proxy_protected_request(config, api_method, parts, body, peer).await
-                } else {
-                    handle_api_request(rpcenv, api_method, Some(formatter), parts, body, uri_param)
-                        .await
-                };
-
-                let mut response = match result {
-                    Ok(resp) => resp,
-                    Err(err) => formatter.format_error(err),
-                };
-
-                if let Some(auth_id) = auth_id {
-                    response
-                        .extensions_mut()
-                        .insert(AuthStringExtension(auth_id));
-                }
-
-                Ok(response)
-            }
-        }
+        Ok(response)
     }
 }
 
@@ -1240,7 +1296,6 @@ impl Unformatted {
             full_path,
             relative_path_components,
             mut rpcenv,
-            #[cfg(feature = "rate-limited-stream")]
             rate_limit_tags,
         }: ApiRequestData<'_>,
     ) -> Result<Response<Body>, Error> {
@@ -1248,97 +1303,36 @@ impl Unformatted {
             http_bail!(NOT_FOUND, "invalid api path '{}'", full_path);
         }
 
-        let mut uri_param = HashMap::new();
-        let api_method = self.router.find_method(
-            relative_path_components,
-            parts.method.clone(),
-            &mut uri_param,
-        );
+        let context = RequestContext {
+            parts: &parts,
+            config,
+            full_path,
+            rate_limit_tags: rate_limit_tags.as_ref(),
+        };
 
-        let mut auth_required = true;
-        if let Some(api_method) = api_method {
-            if let Permission::World = *api_method.access.permission {
-                auth_required = false; // no auth for endpoints with World permission
-            }
-        }
+        let (api_method, uri_param) =
+            authorize_request(self.router, relative_path_components, &context, &mut rpcenv).await?;
 
-        let user_info: Box<dyn UserInformation + Send + Sync>;
+        let auth_id = rpcenv.get_auth_id();
 
-        if auth_required {
-            match config.check_auth(&parts.headers, &parts.method).await {
-                Ok((authid, info)) => {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(vec![RateLimiterTag::User(authid.clone())]);
-                    }
-                    rpcenv.set_auth_id(Some(authid));
-                    user_info = info;
-                }
-                Err(auth_err) => {
-                    #[cfg(feature = "rate-limited-stream")]
-                    if let Some(handle) = rate_limit_tags.as_ref() {
-                        handle.set_tags(Vec::new());
-                    }
-                    let err = match auth_err {
-                        AuthError::Generic(err) => err,
-                        AuthError::NoData => {
-                            format_err!("no authentication credentials provided.")
-                        }
-                    };
-                    // fixme: log Username??
-                    rpcenv.log_failed_auth(None, &err.to_string());
-
-                    // always delay unauthorized calls by 3 seconds (from start of request)
-                    tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
-                    return Err(http_err!(UNAUTHORIZED, "authentication failed"));
-                }
-            }
+        let result = if api_method.protected && rpcenv.env_type == RpcEnvironmentType::PUBLIC {
+            proxy_protected_request(config, api_method, parts, body, peer).await
         } else {
-            #[cfg(feature = "rate-limited-stream")]
-            if let Some(handle) = rate_limit_tags.as_ref() {
-                handle.set_tags(Vec::new());
-            }
-            user_info = Box::new(EmptyUserInformation {});
+            handle_api_request(rpcenv, api_method, None, parts, body, uri_param).await
+        };
+
+        let mut response = match result {
+            Ok(resp) => resp,
+            Err(err) => crate::formatter::error_to_response(err),
+        };
+
+        if let Some(auth_id) = auth_id {
+            response
+                .extensions_mut()
+                .insert(AuthStringExtension(auth_id));
         }
 
-        match api_method {
-            None => http_bail!(NOT_FOUND, "Path '{}' not found.", full_path),
-            Some(api_method) => {
-                let auth_id = rpcenv.get_auth_id();
-                let user_info = user_info;
-
-                if !check_api_permission(
-                    api_method.access.permission,
-                    auth_id.as_deref(),
-                    &uri_param,
-                    user_info.as_ref(),
-                ) {
-                    let err = http_err!(FORBIDDEN, "permission check failed");
-                    tokio::time::sleep_until(Instant::from_std(access_forbidden_time())).await;
-                    return Err(err);
-                }
-
-                let result =
-                    if api_method.protected && rpcenv.env_type == RpcEnvironmentType::PUBLIC {
-                        proxy_protected_request(config, api_method, parts, body, peer).await
-                    } else {
-                        handle_api_request(rpcenv, api_method, None, parts, body, uri_param).await
-                    };
-
-                let mut response = match result {
-                    Ok(resp) => resp,
-                    Err(err) => crate::formatter::error_to_response(err),
-                };
-
-                if let Some(auth_id) = auth_id {
-                    response
-                        .extensions_mut()
-                        .insert(AuthStringExtension(auth_id));
-                }
-
-                Ok(response)
-            }
-        }
+        Ok(response)
     }
 }
 
@@ -1350,6 +1344,81 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(name, value.parse().unwrap());
         headers
+    }
+
+    struct TestUser;
+
+    impl UserInformation for TestUser {
+        fn is_superuser(&self, _userid: &str) -> bool {
+            false
+        }
+        fn is_group_member(&self, _userid: &str, _group: &str) -> bool {
+            false
+        }
+        fn lookup_privs(&self, _userid: &str, _path: &[&str]) -> u64 {
+            0
+        }
+    }
+
+    fn dummy_api_handler(
+        _param: Value,
+        _info: &ApiMethod,
+        _rpcenv: &mut dyn RpcEnvironment,
+    ) -> Result<Value, Error> {
+        Ok(Value::Null)
+    }
+
+    const HANDLER: ApiHandler = ApiHandler::Sync(&dummy_api_handler);
+    const SCHEMA: proxmox_schema::ObjectSchema = proxmox_schema::ObjectSchema::new("test", &[]);
+
+    const WORLD_METHOD: ApiMethod =
+        ApiMethod::new(&HANDLER, &SCHEMA).access(None, &Permission::World);
+    const ANYBODY_METHOD: ApiMethod =
+        ApiMethod::new(&HANDLER, &SCHEMA).access(None, &Permission::Anybody);
+
+    static WORLD_ROUTER: Router = Router::new().get(&WORLD_METHOD);
+    static ANYBODY_ROUTER: Router = Router::new().get(&ANYBODY_METHOD);
+    static EMPTY_ROUTER: Router = Router::new();
+
+    fn request_parts() -> Parts {
+        http::Request::builder()
+            .method(http::Method::GET)
+            .uri("/")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0
+    }
+
+    fn auth_config(authenticates: bool) -> Arc<ApiConfig> {
+        Arc::new(
+            ApiConfig::new(".", RpcEnvironmentType::PUBLIC).auth_handler_func(move |_, _| {
+                Box::pin(async move {
+                    if authenticates {
+                        let user: Box<dyn UserInformation + Send + Sync> = Box::new(TestUser);
+                        Ok(("tester@pam".to_string(), user))
+                    } else {
+                        Err(AuthError::NoData)
+                    }
+                })
+            }),
+        )
+    }
+
+    async fn authorize(
+        router: &'static Router,
+        config: &Arc<ApiConfig>,
+        rpcenv: &mut RestEnvironment,
+    ) -> Result<(&'static ApiMethod, HashMap<String, String>), RequestError> {
+        let parts = request_parts();
+        let context = RequestContext {
+            parts: &parts,
+            config,
+            full_path: "/test",
+            rate_limit_tags: None,
+        };
+
+        authorize_request(router, &[], &context, rpcenv).await
     }
 
     #[test]
@@ -1397,5 +1466,69 @@ mod tests {
         let agent = get_user_agent(&headers("user-agent", &long)).unwrap();
 
         assert_eq!(agent.len(), 128);
+    }
+
+    #[tokio::test]
+    async fn a_world_endpoint_needs_no_credentials() {
+        let config = Arc::new(
+            ApiConfig::new(".", RpcEnvironmentType::PUBLIC).auth_handler_func(|_, _| {
+                panic!("world-accessible methods must not invoke authentication")
+            }),
+        );
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+
+        let result = authorize(&WORLD_ROUTER, &config, &mut rpcenv).await;
+
+        assert!(result.is_ok());
+        assert_eq!(rpcenv.get_auth_id(), None);
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_caller_reaches_the_method() {
+        let config = auth_config(true);
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+
+        let result = authorize(&ANYBODY_ROUTER, &config, &mut rpcenv).await;
+
+        assert!(result.is_ok());
+        assert_eq!(rpcenv.get_auth_id().as_deref(), Some("tester@pam"));
+    }
+
+    #[tokio::test]
+    async fn routing_parameters_are_used_for_authorization() {
+        const USERID: proxmox_schema::Schema =
+            proxmox_schema::StringSchema::new("The user.").schema();
+        const USERID_SCHEMA: proxmox_schema::ObjectSchema =
+            proxmox_schema::ObjectSchema::new("test", &[("userid", false, &USERID)]);
+        const METHOD: ApiMethod =
+            ApiMethod::new(&HANDLER, &USERID_SCHEMA).access(None, &Permission::UserParam("userid"));
+        static ROUTER: Router = Router::new().match_all("userid", &Router::new().get(&METHOD));
+        let config = auth_config(true);
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+        let parts = request_parts();
+        let context = RequestContext {
+            parts: &parts,
+            config: &config,
+            full_path: "/tester@pam",
+            rate_limit_tags: None,
+        };
+
+        let result = authorize_request(&ROUTER, &["tester@pam"], &context, &mut rpcenv).await;
+        let Ok((_, params)) = result else {
+            panic!("the path's user must be allowed to access their own method");
+        };
+        assert_eq!(params.get("userid").map(String::as_str), Some("tester@pam"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_path_is_authenticated_before_it_is_reported_missing() {
+        let config = auth_config(true);
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+
+        let result = authorize(&EMPTY_ROUTER, &config, &mut rpcenv).await;
+
+        assert!(matches!(result, Err(RequestError::NotFound(_))));
+        // an unknown path must not be a way around authentication
+        assert_eq!(rpcenv.get_auth_id().as_deref(), Some("tester@pam"));
     }
 }
