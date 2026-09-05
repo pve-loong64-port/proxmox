@@ -1,6 +1,7 @@
 //! Token bucket based traffic rate limiter implementations.
 
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![deny(missing_docs)]
 
 #[cfg(feature = "rate-limiter")]
 mod rate_limiter;

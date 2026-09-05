@@ -5,6 +5,9 @@ use anyhow::{Error, bail};
 /// Rate limiter interface.
 pub trait RateLimit {
     /// Update rate and bucket size
+    ///
+    /// The next refill applies the new rate to all elapsed time not yet accounted for, including
+    /// any fractional-token remainder.
     fn update_rate(&mut self, rate: u64, bucket_size: u64);
 
     /// Returns the overall traffic (since started)
@@ -19,8 +22,14 @@ pub trait RateLimit {
 ///
 /// This is useful for types providing internal mutability (Mutex).
 pub trait ShareableRateLimit: Send + Sync {
+    /// Update rate and bucket size, with the same semantics as [`RateLimit::update_rate`].
     fn update_rate(&self, rate: u64, bucket_size: u64);
+
+    /// Returns the overall traffic (since started)
     fn traffic(&self) -> u64;
+
+    /// Register traffic, returning a proposed delay to reach the
+    /// expected rate.
     fn register_traffic(&self, current_time: Instant, data_len: u64) -> Duration;
 }
 
