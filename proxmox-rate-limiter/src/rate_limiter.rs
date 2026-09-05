@@ -113,6 +113,21 @@ pub struct RateLimiter {
     state: TbfState,
 }
 
+// Processes sharing a mapping may run different versions of this crate, so guard the offsets and
+// not just the overall size: reordering the fields would keep the size but break every mapping.
+const _: () = {
+    use std::mem::offset_of;
+
+    assert!(offset_of!(RateLimiter, rate) == 0);
+    assert!(offset_of!(RateLimiter, bucket_size) == size_of::<u64>());
+    assert!(offset_of!(RateLimiter, state) == 2 * size_of::<u64>());
+
+    assert!(offset_of!(TbfState, traffic) == 0);
+    assert!(offset_of!(TbfState, last_update) == size_of::<u64>());
+    assert!(offset_of!(TbfState, consumed_tokens) == size_of::<u64>() + size_of::<Instant>());
+    assert!(size_of::<TbfState>() == 2 * size_of::<u64>() + size_of::<Instant>());
+};
+
 impl RateLimiter {
     /// Creates a new instance, using [Instant::now] as start time.
     pub fn new(rate: u64, bucket_size: u64) -> Self {

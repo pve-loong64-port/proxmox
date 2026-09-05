@@ -36,8 +36,14 @@ impl Init for WrapLimiter {
 struct SharedRateLimiterData {
     magic: [u8; 8],
     tbf: SharedMutex<WrapLimiter>,
-    padding: [u8; 4096 - 104],
+    // fill up to exactly one page, as `SharedMemory` needs a multiple of the page size. The mutex
+    // size depends on the architecture's `pthread_mutex_t`, so the padding cannot be hardcoded.
+    padding: [u8; 4096 - 8 - size_of::<SharedMutex<WrapLimiter>>()],
 }
+
+// The mapping is shared with other processes, possibly running a different version of this crate,
+// so the size must not drift when any of the members change.
+const _: () = assert!(size_of::<SharedRateLimiterData>() == 4096);
 
 impl Init for SharedRateLimiterData {
     fn initialize(this: &mut MaybeUninit<Self>) {
