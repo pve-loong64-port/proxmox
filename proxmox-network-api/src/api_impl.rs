@@ -8,6 +8,18 @@ use crate::{
 };
 use crate::{parse_vlan_id_from_name, parse_vlan_raw_device_from_name};
 
+/// Reject a config method that cannot work for IPv4.
+///
+/// `auto` configures the address from IPv6 router advertisements, so it is meaningless for IPv4.
+/// Only a method supplied through the API is rejected. One that is already in the config file
+/// stays untouched, since rewriting what an administrator put there would be surprising.
+fn check_v4_method(method: Option<NetworkConfigMethod>) -> Result<(), Error> {
+    if method == Some(NetworkConfigMethod::Auto) {
+        bail!("config method 'auto' is not supported for IPv4");
+    }
+    Ok(())
+}
+
 /// Create network interface configuration.
 pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), Error> {
     let interface_type = match config.interface_type {
@@ -29,6 +41,7 @@ pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), E
     if let Some(autostart) = config.autostart {
         interface.autostart = autostart;
     }
+    check_v4_method(config.method)?;
     if config.method.is_some() {
         interface.method = config.method;
     }
@@ -251,6 +264,7 @@ pub fn update_interface(
     if let Some(autostart) = update.autostart {
         interface.autostart = autostart;
     }
+    check_v4_method(update.method)?;
     if update.method.is_some() {
         interface.method = update.method;
     }
@@ -346,4 +360,24 @@ pub fn update_interface(
     crate::save_config(&network_config)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_is_rejected_for_ipv4() {
+        assert!(check_v4_method(Some(NetworkConfigMethod::Auto)).is_err());
+
+        assert!(check_v4_method(None).is_ok());
+        for method in [
+            NetworkConfigMethod::Manual,
+            NetworkConfigMethod::Static,
+            NetworkConfigMethod::DHCP,
+            NetworkConfigMethod::Loopback,
+        ] {
+            assert!(check_v4_method(Some(method)).is_ok());
+        }
+    }
 }
