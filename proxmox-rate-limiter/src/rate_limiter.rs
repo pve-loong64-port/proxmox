@@ -66,8 +66,8 @@ impl TbfState {
     ) -> Duration {
         self.refill_bucket(rate, current_time);
 
-        self.traffic += data_len;
-        self.consumed_tokens += data_len;
+        self.traffic = self.traffic.saturating_add(data_len);
+        self.consumed_tokens = self.consumed_tokens.saturating_add(data_len);
 
         if self.consumed_tokens <= bucket_size {
             return Self::NO_DELAY;
@@ -213,5 +213,21 @@ impl RateLimiterVec {
         }
 
         Ok(self.state[index].register_traffic(self.rate, self.bucket_size, current_time, data_len))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counters_saturate_instead_of_wrapping() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::with_start_time(1000, 0, start);
+
+        let delay = limiter.register_traffic(start, u64::MAX);
+        // Wrapping would erase both the recorded traffic and the outstanding debt.
+        assert_eq!(limiter.register_traffic(start, 1), delay);
+        assert_eq!(limiter.traffic(), u64::MAX);
     }
 }
