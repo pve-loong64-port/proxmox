@@ -1341,3 +1341,61 @@ impl Unformatted {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(name: &'static str, value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(name, value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn compression_is_only_picked_up_from_accept_encoding() {
+        let deflate = headers("accept-encoding", "deflate");
+        assert_eq!(
+            extract_compression_method(&deflate),
+            Some(CompressionMethod::Deflate)
+        );
+
+        let weighted = headers("accept-encoding", "br, gzip;q=0.8, deflate;q=0.5");
+        assert_eq!(
+            extract_compression_method(&weighted),
+            Some(CompressionMethod::Deflate)
+        );
+
+        assert_eq!(
+            extract_compression_method(&headers("accept-encoding", "gzip")),
+            None
+        );
+        assert_eq!(extract_compression_method(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn content_types_are_derived_from_the_file_extension() {
+        for (file, content_type, no_compression) in [
+            ("index.html", "text/html", false),
+            ("app.js", "application/javascript", false),
+            ("logo.png", "image/png", true),
+            ("font.woff2", "application/font-woff2", true),
+            ("archive", "application/octet-stream", false),
+            ("unknown.xyz", "application/octet-stream", false),
+        ] {
+            assert_eq!(
+                extension_to_content_type(Path::new(file)),
+                (content_type, no_compression),
+                "failed for {file}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_user_agent_is_truncated() {
+        let long = "x".repeat(200);
+        let agent = get_user_agent(&headers("user-agent", &long)).unwrap();
+
+        assert_eq!(agent.len(), 128);
+    }
+}

@@ -572,3 +572,58 @@ fn contains_tls_handshake_fragment(buf: &[u8]) -> bool {
 
     buf[0] == 0x16 && buf[1] == 0x3 && (((buf[3] as u16) << 8) + buf[4] as u16) <= CONTENT_SIZE
 }
+
+#[cfg(test)]
+mod tests {
+    use super::contains_tls_handshake_fragment;
+
+    #[test]
+    fn a_handshake_fragment_is_detected() {
+        // content type 22, major version 3, any minor version, length within 2^14
+        assert!(contains_tls_handshake_fragment(&[
+            0x16, 0x3, 0x1, 0x02, 0x00
+        ]));
+        assert!(contains_tls_handshake_fragment(&[
+            0x16, 0x3, 0x3, 0x00, 0x01
+        ]));
+        // a full fragment worth of content is still valid
+        assert!(contains_tls_handshake_fragment(&[
+            0x16, 0x3, 0x3, 0x40, 0x00
+        ]));
+    }
+
+    #[test]
+    fn plaintext_traffic_is_not_mistaken_for_a_handshake() {
+        assert!(!contains_tls_handshake_fragment(b"GET / HTTP/1.1"));
+        assert!(!contains_tls_handshake_fragment(b"POST /"));
+    }
+
+    #[test]
+    fn an_incomplete_fragment_is_rejected() {
+        assert!(!contains_tls_handshake_fragment(&[]));
+        assert!(!contains_tls_handshake_fragment(&[0x16, 0x3, 0x1, 0x02]));
+    }
+
+    #[test]
+    fn an_oversized_fragment_is_rejected() {
+        // a plaintext fragment must not exceed 2^14 bytes
+        assert!(!contains_tls_handshake_fragment(&[
+            0x16, 0x3, 0x3, 0x40, 0x01
+        ]));
+        assert!(!contains_tls_handshake_fragment(&[
+            0x16, 0x3, 0x3, 0xff, 0xff
+        ]));
+    }
+
+    #[test]
+    fn other_record_types_and_versions_are_rejected() {
+        // application data instead of a handshake
+        assert!(!contains_tls_handshake_fragment(&[
+            0x17, 0x3, 0x3, 0x00, 0x01
+        ]));
+        // SSL 2.0 style record
+        assert!(!contains_tls_handshake_fragment(&[
+            0x16, 0x2, 0x0, 0x00, 0x01
+        ]));
+    }
+}

@@ -170,3 +170,52 @@ pub fn normalize_path(path: &str) -> Result<String, IllegalPathComponents> {
     }
     Ok(output)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_are_stripped_of_empty_components() {
+        assert_eq!(normalize_path("/a//b///c/").unwrap(), "/a/b/c");
+        assert_eq!(normalize_path("a/b").unwrap(), "/a/b");
+        assert_eq!(normalize_path("/").unwrap(), "");
+        assert_eq!(normalize_path("").unwrap(), "");
+    }
+
+    #[test]
+    fn dot_components_are_rejected() {
+        for path in [
+            "/..",
+            "/a/../b",
+            "/./a",
+            "/a/.hidden",
+            "/.git/config",
+            "/a/..",
+        ] {
+            assert!(normalize_path(path).is_err(), "accepted {path}");
+            assert!(
+                normalize_path_with_components(path).is_err(),
+                "accepted {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn percent_encoding_is_left_untouched() {
+        // the path is used as-is for file lookups, so it must not be decoded here: if decoding is
+        // ever added it has to happen *before* the dot check, not after
+        let (path, components) = normalize_path_with_components("/%2e%2e/etc").unwrap();
+
+        assert_eq!(path, "/%2e%2e/etc");
+        assert_eq!(components, ["%2e%2e", "etc"]);
+    }
+
+    #[test]
+    fn components_match_the_normalized_path() {
+        let (path, components) = normalize_path_with_components("//api2//json/").unwrap();
+
+        assert_eq!(path, "/api2/json");
+        assert_eq!(components, ["api2", "json"]);
+    }
+}
