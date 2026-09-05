@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::time::{Duration, Instant};
 
 use anyhow::{Error, bail};
@@ -44,17 +43,39 @@ impl TbfState {
             None => return,
         };
 
-        if time_diff == 0 {
+        let allowed_traffic = time_diff.saturating_mul(u128::from(rate)) / 1_000_000_000;
+
+        if allowed_traffic == 0 {
+            // Keep `last_update` so that the elapsed time is accounted for on a later refill.
+            // Advancing it here would truncate the refill to zero on every call, which stalls the
+            // bucket indefinitely whenever updates come in faster than the rate grants a token.
             return;
         }
 
-        self.last_update = current_time;
+        if allowed_traffic >= u128::from(self.consumed_tokens) {
+            self.consumed_tokens = 0;
+            self.last_update = current_time;
+            return;
+        }
 
-        let allowed_traffic = ((time_diff.saturating_mul(rate as u128)) / 1_000_000_000)
-            .try_into()
-            .unwrap_or(u64::MAX);
+        let allowed_traffic = allowed_traffic as u64; // less than consumed_tokens, so this fits
+        self.consumed_tokens -= allowed_traffic;
 
-        self.consumed_tokens = self.consumed_tokens.saturating_sub(allowed_traffic);
+        // Only account for the time that was actually turned into tokens, the remainder is left
+        // for the next refill, otherwise the truncated division would drop tokens on every call.
+        // Round the consumed time up. Rounding it down hands the fraction of a nanosecond that
+        // is left over to the next call, and repeating that at a fine granularity adds up to
+        // more than the configured rate. Erring the other way costs at most a nanosecond of
+        // refill per call and can never grant more than the rate allows.
+        let used_time = u128::from(allowed_traffic)
+            .saturating_mul(1_000_000_000)
+            .div_ceil(u128::from(rate))
+            .min(time_diff);
+        let used_time = Duration::from_nanos(u64::try_from(used_time).unwrap_or(u64::MAX));
+        self.last_update = self
+            .last_update
+            .checked_add(used_time)
+            .unwrap_or(current_time);
     }
 
     fn register_traffic(
@@ -222,6 +243,8 @@ mod tests {
 
     const SECOND: Duration = Duration::from_secs(1);
 
+    const MILLI: Duration = Duration::from_millis(1);
+
     #[test]
     fn empty_bucket_delays_until_tokens_are_available() {
         let start = Instant::now();
@@ -244,6 +267,92 @@ mod tests {
         );
         // .. and is empty again afterwards
         assert_eq!(limiter.register_traffic(start + SECOND, 1000), SECOND);
+    }
+
+    #[test]
+    fn refills_at_rates_below_one_token_per_update() {
+        let start = Instant::now();
+        // 100 tokens/s means a single 1ms update interval is worth only a tenth of a token
+        let mut limiter = RateLimiter::with_start_time(100, 0, start);
+
+        assert_eq!(limiter.register_traffic(start, 100), SECOND);
+
+        let mut now = start;
+        for _ in 0..1000 {
+            now += MILLI;
+            limiter.register_traffic(now, 0);
+        }
+
+        // one second at 100 tokens/s refills exactly the 100 consumed tokens
+        assert_eq!(limiter.register_traffic(now, 0), TbfState::NO_DELAY);
+    }
+
+    #[test]
+    fn refill_keeps_the_sub_token_remainder() {
+        let start = Instant::now();
+        // 100 tokens/s, so a single 1ms step is worth only a tenth of a token
+        let mut limiter = RateLimiter::with_start_time(100, 0, start);
+
+        assert_eq!(limiter.register_traffic(start, 10), SECOND / 10);
+
+        let mut now = start;
+        for _ in 0..10 {
+            now += MILLI;
+            limiter.register_traffic(now, 0);
+        }
+
+        // the ten steps add up to exactly one token, so one of the ten outstanding tokens is
+        // paid off, which only happens if the sub-token remainders were not dropped
+        assert_eq!(limiter.register_traffic(now, 0), SECOND * 9 / 100);
+    }
+
+    #[test]
+    fn a_high_rate_does_not_grant_the_same_time_twice() {
+        let start = Instant::now();
+        // more than one token per nanosecond, so converting a granted token back into time
+        // rounds down to nothing
+        let mut limiter = RateLimiter::with_start_time(1_500_000_000, 0, start);
+
+        limiter.register_traffic(start, 10);
+
+        // repeating the very same instant must not pay off the outstanding debt
+        let now = start + Duration::from_nanos(1);
+        for _ in 0..10 {
+            limiter.register_traffic(now, 0);
+            assert_eq!(limiter.state.consumed_tokens, 9);
+        }
+    }
+
+    #[test]
+    fn refilling_one_nanosecond_at_a_time_stays_within_the_rate() {
+        let start = Instant::now();
+        // 0.6 tokens per nanosecond, so no single step is worth a whole token
+        let mut limiter = RateLimiter::with_start_time(600_000_000, 0, start);
+
+        assert_eq!(
+            limiter.register_traffic(start, 100),
+            Duration::from_nanos(166)
+        );
+
+        let mut now = start;
+        for _ in 0..10 {
+            now += Duration::from_nanos(1);
+            limiter.register_traffic(now, 0);
+        }
+
+        // Ten nanoseconds are worth six tokens. Check the debt directly, since the returned
+        // delay truncates fractional nanoseconds and can hide small accounting errors.
+        assert!(limiter.state.consumed_tokens >= 94);
+        assert!(limiter.state.consumed_tokens < 100);
+        let left = limiter.register_traffic(now, 0);
+        assert!(
+            left >= Duration::from_nanos(156),
+            "granted too much: {left:?}"
+        );
+        assert!(
+            left < Duration::from_nanos(166),
+            "granted nothing: {left:?}"
+        );
     }
 
     #[test]
