@@ -20,6 +20,27 @@ fn check_v4_method(method: Option<NetworkConfigMethod>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Determine the config method of one address family after the addresses have been applied.
+///
+/// A configured address or gateway implies `static`. A `static` entry that has neither left falls
+/// back to `manual`, as it would otherwise be written out without an address. The remaining
+/// methods, `dhcp`, `auto`, `loopback` and an explicitly chosen `manual`, do not take their
+/// address from this config and are preserved as they are, otherwise updating an unrelated
+/// property would silently rewrite, for example, a `dhcp` interface to `manual`.
+fn method_for_address(
+    current: Option<NetworkConfigMethod>,
+    has_address: bool,
+) -> NetworkConfigMethod {
+    if has_address {
+        return NetworkConfigMethod::Static;
+    }
+
+    match current {
+        None | Some(NetworkConfigMethod::Static) => NetworkConfigMethod::Manual,
+        Some(method) => method,
+    }
+}
+
 /// Create network interface configuration.
 pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), Error> {
     let interface_type = match config.interface_type {
@@ -148,17 +169,14 @@ pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), E
         ),
     }
 
-    if interface.cidr.is_some() || interface.gateway.is_some() {
-        interface.method = Some(NetworkConfigMethod::Static);
-    } else if interface.method.is_none() {
-        interface.method = Some(NetworkConfigMethod::Manual);
-    }
-
-    if interface.cidr6.is_some() || interface.gateway6.is_some() {
-        interface.method6 = Some(NetworkConfigMethod::Static);
-    } else if interface.method6.is_none() {
-        interface.method6 = Some(NetworkConfigMethod::Manual);
-    }
+    interface.method = Some(method_for_address(
+        interface.method,
+        interface.cidr.is_some() || interface.gateway.is_some(),
+    ));
+    interface.method6 = Some(method_for_address(
+        interface.method6,
+        interface.cidr6.is_some() || interface.gateway6.is_some(),
+    ));
 
     network_config.interfaces.insert(iface, interface);
 
@@ -338,17 +356,14 @@ pub fn update_interface(
         interface.comments6 = update.comments6;
     }
 
-    if interface.cidr.is_some() || interface.gateway.is_some() {
-        interface.method = Some(NetworkConfigMethod::Static);
-    } else {
-        interface.method = Some(NetworkConfigMethod::Manual);
-    }
-
-    if interface.cidr6.is_some() || interface.gateway6.is_some() {
-        interface.method6 = Some(NetworkConfigMethod::Static);
-    } else {
-        interface.method6 = Some(NetworkConfigMethod::Manual);
-    }
+    interface.method = Some(method_for_address(
+        interface.method,
+        interface.cidr.is_some() || interface.gateway.is_some(),
+    ));
+    interface.method6 = Some(method_for_address(
+        interface.method6,
+        interface.cidr6.is_some() || interface.gateway6.is_some(),
+    ));
 
     if update.vlan_id.is_some() {
         interface.vlan_id = update.vlan_id;
@@ -366,6 +381,37 @@ pub fn update_interface(
 mod tests {
     use super::*;
 
+    const METHODS: [NetworkConfigMethod; 5] = [
+        NetworkConfigMethod::Manual,
+        NetworkConfigMethod::Static,
+        NetworkConfigMethod::DHCP,
+        NetworkConfigMethod::Loopback,
+        NetworkConfigMethod::Auto,
+    ];
+
+    #[test]
+    fn a_configured_address_always_implies_static() {
+        assert_eq!(method_for_address(None, true), NetworkConfigMethod::Static);
+        for method in METHODS {
+            assert_eq!(
+                method_for_address(Some(method), true),
+                NetworkConfigMethod::Static
+            );
+        }
+    }
+
+    #[test]
+    fn self_configuring_methods_survive_without_an_address() {
+        for method in [
+            NetworkConfigMethod::DHCP,
+            NetworkConfigMethod::Loopback,
+            NetworkConfigMethod::Auto,
+            NetworkConfigMethod::Manual,
+        ] {
+            assert_eq!(method_for_address(Some(method), false), method);
+        }
+    }
+
     #[test]
     fn auto_is_rejected_for_ipv4() {
         assert!(check_v4_method(Some(NetworkConfigMethod::Auto)).is_err());
@@ -379,5 +425,14 @@ mod tests {
         ] {
             assert!(check_v4_method(Some(method)).is_ok());
         }
+    }
+
+    #[test]
+    fn static_without_an_address_degrades_to_manual() {
+        assert_eq!(
+            method_for_address(Some(NetworkConfigMethod::Static), false),
+            NetworkConfigMethod::Manual
+        );
+        assert_eq!(method_for_address(None, false), NetworkConfigMethod::Manual);
     }
 }
