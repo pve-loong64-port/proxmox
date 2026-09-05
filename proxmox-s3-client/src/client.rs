@@ -280,7 +280,7 @@ impl S3Client {
 
             if let Some(limit) = limiter_config.passive {
                 let limiter = SharedRateLimiter::mmap_shmem(
-                    &format!("{}.active-requests", limiter_config.options.id),
+                    &format!("{}.passive-requests", limiter_config.options.id),
                     limit,
                     limit,
                     limiter_config.options.user.clone(),
@@ -1025,5 +1025,71 @@ impl S3Client {
         uri_parts.path_and_query = Some(path_and_query);
 
         Uri::from_parts(uri_parts).context("failed to build uri")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn active_and_passive_requests_use_separate_buckets() -> Result<(), Error> {
+        // The production mapping requires tmpfs; no S3 connection is made by the constructor.
+        let directory = TestDirectory(proxmox_sys::fs::make_tmp_dir("/dev/shm", None)?);
+        let user = User::from_uid(nix::unistd::Uid::current())?
+            .ok_or_else(|| format_err!("current user not found"))?;
+        let config = S3ClientConfig {
+            endpoint: "s3.example.invalid".to_string(),
+            access_key: "test".to_string(),
+            port: None,
+            region: None,
+            fingerprint: None,
+            path_style: None,
+            put_rate_limit: None,
+            provider_quirks: None,
+            rate_in: None,
+            burst_in: None,
+            rate_out: None,
+            burst_out: None,
+            limit_active_requests: Some(2),
+            limit_passive_requests: Some(10),
+            use_node_proxy: None,
+        };
+        let options = S3ClientOptions::from_config(
+            config,
+            "secret".to_string(),
+            None,
+            String::new(),
+            Some(S3RateLimiterOptions {
+                id: "test".to_string(),
+                base_path: directory.0.clone(),
+                user,
+            }),
+            None,
+            None,
+        );
+        let client = S3Client::new(options)?;
+        let active = client.active_request_rate_limiter.as_ref().unwrap();
+        let passive = client.passive_request_rate_limiter.as_ref().unwrap();
+
+        // Settle initialization at a single timestamp, then exhaust each bucket independently.
+        let now = Instant::now() + Duration::from_secs(2);
+        active.register_traffic(now, 0);
+        passive.register_traffic(now, 0);
+        assert_eq!(active.register_traffic(now, 2), Duration::ZERO);
+        assert_eq!(active.register_traffic(now, 1), Duration::from_millis(500));
+        assert_eq!(passive.traffic(), 0);
+        assert_eq!(passive.register_traffic(now, 10), Duration::ZERO);
+        assert_eq!(passive.register_traffic(now, 1), Duration::from_millis(100));
+        assert_eq!(active.traffic(), 3);
+        Ok(())
     }
 }
