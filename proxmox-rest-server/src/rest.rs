@@ -788,6 +788,7 @@ struct RequestContext<'a> {
     config: &'a ApiConfig,
     full_path: &'a str,
     rate_limit_tags: Option<&'a RateLimiterTagsHandle>,
+    request_start: Instant,
 }
 
 /// Look up the API method for a request and run the authentication and permission checks.
@@ -800,6 +801,7 @@ async fn authorize_request(
     request: &RequestContext<'_>,
     rpcenv: &mut RestEnvironment,
 ) -> Result<(&'static ApiMethod, HashMap<String, String>), RequestError> {
+    let request_start = request.request_start;
     let mut uri_param = HashMap::new();
     let api_method = router.find_method(
         path_components,
@@ -834,7 +836,7 @@ async fn authorize_request(
                 rpcenv.log_failed_auth(None, &err.to_string());
 
                 // always delay unauthorized calls by 3 seconds (from start of request)
-                tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
+                tokio::time::sleep_until(delay_unauth_time(request_start)).await;
                 return Err(RequestError::Unauthorized(http_err!(
                     UNAUTHORIZED,
                     "authentication failed"
@@ -860,7 +862,7 @@ async fn authorize_request(
         &uri_param,
         user_info.as_ref(),
     ) {
-        tokio::time::sleep_until(Instant::from_std(access_forbidden_time())).await;
+        tokio::time::sleep_until(access_forbidden_time(request_start)).await;
         return Err(RequestError::Forbidden(http_err!(
             FORBIDDEN,
             "permission check failed"
@@ -870,12 +872,14 @@ async fn authorize_request(
     Ok((api_method, uri_param))
 }
 
-fn delay_unauth_time() -> std::time::Instant {
-    std::time::Instant::now() + std::time::Duration::from_millis(3000)
+/// Mask authentication runtime up to three seconds, measured before the check starts.
+fn delay_unauth_time(auth_start: Instant) -> Instant {
+    auth_start + std::time::Duration::from_millis(3000)
 }
 
-fn access_forbidden_time() -> std::time::Instant {
-    std::time::Instant::now() + std::time::Duration::from_millis(500)
+/// When to answer a request that was denied by the permission check, see [`delay_unauth_time`].
+fn access_forbidden_time(request_start: Instant) -> Instant {
+    request_start + std::time::Duration::from_millis(500)
 }
 
 fn handle_stream_as_json_seq(stream: proxmox_router::Stream) -> Result<Response<Body>, Error> {
@@ -930,19 +934,25 @@ pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
             .any(|e| e == b"application/json-seq" || e.starts_with(b"application/json-seq;"))
     });
 
+    // Body reception is client-controlled and must not consume the delay that masks a handler's
+    // authentication check. Start that deadline only once its parameters are available.
+    let handler_start;
     let result = match info.handler {
         ApiHandler::AsyncHttp(handler) => {
             let params = parse_query_parameters(info.parameters, "", &parts, &uri_param)?;
+            handler_start = Instant::now();
             (handler)(parts, req_body, params, info, Box::new(rpcenv)).await
         }
         ApiHandler::AsyncHttpBodyParameters(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             (handler)(parts, params, info, Box::new(rpcenv)).await
         }
         ApiHandler::StreamSync(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             match (handler)(params, info, &mut rpcenv) {
                 Ok(iter) if accept_json_seq => handle_sync_stream_as_json_seq(iter),
                 Ok(iter) => iter
@@ -954,6 +964,7 @@ pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
         ApiHandler::StreamAsync(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             match (handler)(params, info, &mut rpcenv).await {
                 Ok(stream) if accept_json_seq => handle_stream_as_json_seq(stream),
                 Ok(stream) => stream
@@ -966,12 +977,14 @@ pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
         ApiHandler::SerializingSync(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             (handler)(params, info, &mut rpcenv)
                 .and_then(|data| formatter.format_data_streaming(data, &rpcenv))
         }
         ApiHandler::SerializingAsync(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             (handler)(params, info, &mut rpcenv)
                 .await
                 .and_then(|data| formatter.format_data_streaming(data, &rpcenv))
@@ -979,11 +992,13 @@ pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
         ApiHandler::Sync(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             (handler)(params, info, &mut rpcenv).map(|data| formatter.format_data(data, &rpcenv))
         }
         ApiHandler::Async(handler) => {
             let params =
                 get_request_parameters(info.parameters, &parts, req_body, uri_param).await?;
+            handler_start = Instant::now();
             (handler)(params, info, &mut rpcenv)
                 .await
                 .map(|data| formatter.format_data(data, &rpcenv))
@@ -998,7 +1013,7 @@ pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
         Err(err) => {
             if let Some(httperr) = err.downcast_ref::<HttpError>() {
                 if httperr.code == StatusCode::UNAUTHORIZED {
-                    tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
+                    tokio::time::sleep_until(delay_unauth_time(handler_start)).await;
                 }
             }
             formatter.format_error(err)
@@ -1190,6 +1205,7 @@ impl ApiConfig {
         peer: &std::net::SocketAddr,
         rate_limit_tags: Option<RateLimiterTagsHandle>,
     ) -> Result<Response<Body>, Error> {
+        let request_start = Instant::now();
         let (parts, body) = req.into_parts();
         let method = parts.method.clone();
         let path = normalize_path(parts.uri.path())?;
@@ -1220,6 +1236,7 @@ impl ApiConfig {
                     relative_path_components,
                     rpcenv,
                     rate_limit_tags: rate_limit_tags.clone(),
+                    request_start,
                 })
                 .await;
         }
@@ -1237,7 +1254,7 @@ impl ApiConfig {
                 }
                 Err(AuthError::Generic(_)) => {
                     set_rate_limit_user(rate_limit_tags.as_ref(), None);
-                    tokio::time::sleep_until(Instant::from_std(delay_unauth_time())).await;
+                    tokio::time::sleep_until(delay_unauth_time(request_start)).await;
                 }
                 Err(AuthError::NoData) => set_rate_limit_user(rate_limit_tags.as_ref(), None),
             }
@@ -1308,6 +1325,7 @@ pub struct ApiRequestData<'a> {
     relative_path_components: &'a [&'a str],
     rpcenv: RestEnvironment,
     rate_limit_tags: Option<RateLimiterTagsHandle>,
+    request_start: Instant,
 }
 
 pub(crate) struct Formatted {
@@ -1326,6 +1344,7 @@ impl Formatted {
             relative_path_components,
             mut rpcenv,
             rate_limit_tags,
+            request_start,
         }: ApiRequestData<'_>,
     ) -> Result<Response<Body>, Error> {
         if relative_path_components.is_empty() {
@@ -1345,6 +1364,7 @@ impl Formatted {
             config,
             full_path,
             rate_limit_tags: rate_limit_tags.as_ref(),
+            request_start,
         };
 
         let (api_method, uri_param) = match authorize_request(
@@ -1402,6 +1422,7 @@ impl Unformatted {
             relative_path_components,
             mut rpcenv,
             rate_limit_tags,
+            request_start,
         }: ApiRequestData<'_>,
     ) -> Result<Response<Body>, Error> {
         if relative_path_components.is_empty() {
@@ -1413,6 +1434,7 @@ impl Unformatted {
             config,
             full_path,
             rate_limit_tags: rate_limit_tags.as_ref(),
+            request_start,
         };
 
         let (api_method, uri_param) =
@@ -1500,9 +1522,12 @@ mod tests {
         ApiMethod::new(&HANDLER, &SCHEMA).access(None, &Permission::World);
     const ANYBODY_METHOD: ApiMethod =
         ApiMethod::new(&HANDLER, &SCHEMA).access(None, &Permission::Anybody);
+    const SUPERUSER_METHOD: ApiMethod =
+        ApiMethod::new(&HANDLER, &SCHEMA).access(None, &Permission::Superuser);
 
     static WORLD_ROUTER: Router = Router::new().get(&WORLD_METHOD);
     static ANYBODY_ROUTER: Router = Router::new().get(&ANYBODY_METHOD);
+    static SUPERUSER_ROUTER: Router = Router::new().get(&SUPERUSER_METHOD);
     static EMPTY_ROUTER: Router = Router::new();
 
     fn request_parts() -> Parts {
@@ -1534,6 +1559,7 @@ mod tests {
         router: &'static Router,
         config: &Arc<ApiConfig>,
         rpcenv: &mut RestEnvironment,
+        request_start: Instant,
     ) -> Result<(&'static ApiMethod, HashMap<String, String>), RequestError> {
         let parts = request_parts();
         let context = RequestContext {
@@ -1541,6 +1567,7 @@ mod tests {
             config,
             full_path: "/test",
             rate_limit_tags: None,
+            request_start,
         };
 
         authorize_request(router, &[], &context, rpcenv).await
@@ -1694,6 +1721,21 @@ mod tests {
     }
 
     #[test]
+    fn the_delays_are_measured_from_the_start_of_the_request() {
+        let start = Instant::now() - std::time::Duration::from_secs(60);
+
+        // computing them from the moment of failure instead would leak how long the check ran
+        assert_eq!(
+            delay_unauth_time(start) - start,
+            std::time::Duration::from_millis(3000)
+        );
+        assert_eq!(
+            access_forbidden_time(start) - start,
+            std::time::Duration::from_millis(500)
+        );
+    }
+
+    #[test]
     fn compression_is_only_picked_up_from_accept_encoding() {
         let deflate = headers("accept-encoding", "deflate");
         assert_eq!(
@@ -1749,7 +1791,7 @@ mod tests {
         );
         let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
 
-        let result = authorize(&WORLD_ROUTER, &config, &mut rpcenv).await;
+        let result = authorize(&WORLD_ROUTER, &config, &mut rpcenv, Instant::now()).await;
 
         assert!(result.is_ok());
         assert_eq!(rpcenv.get_auth_id(), None);
@@ -1760,7 +1802,7 @@ mod tests {
         let config = auth_config(true);
         let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
 
-        let result = authorize(&ANYBODY_ROUTER, &config, &mut rpcenv).await;
+        let result = authorize(&ANYBODY_ROUTER, &config, &mut rpcenv, Instant::now()).await;
 
         assert!(result.is_ok());
         assert_eq!(rpcenv.get_auth_id().as_deref(), Some("tester@pam"));
@@ -1783,6 +1825,7 @@ mod tests {
             config: &config,
             full_path: "/tester@pam",
             rate_limit_tags: None,
+            request_start: Instant::now(),
         };
 
         let result = authorize_request(&ROUTER, &["tester@pam"], &context, &mut rpcenv).await;
@@ -1792,15 +1835,58 @@ mod tests {
         assert_eq!(params.get("userid").map(String::as_str), Some("tester@pam"));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_authentication_is_delayed() {
+        use std::time::Duration;
+
+        let config = auth_config(false);
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+        let start = Instant::now();
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        let pending = authorize(&ANYBODY_ROUTER, &config, &mut rpcenv, start);
+        futures::pin_mut!(pending);
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(1999)).await;
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        // Allow one millisecond for Tokio's timer granularity, but not a fresh three-second delay.
+        tokio::time::advance(Duration::from_millis(2)).await;
+        assert!(matches!(
+            futures::poll!(pending.as_mut()),
+            Poll::Ready(Err(RequestError::Unauthorized(_)))
+        ));
+    }
+
     #[tokio::test]
     async fn an_unknown_path_is_authenticated_before_it_is_reported_missing() {
         let config = auth_config(true);
         let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
 
-        let result = authorize(&EMPTY_ROUTER, &config, &mut rpcenv).await;
+        let result = authorize(&EMPTY_ROUTER, &config, &mut rpcenv, Instant::now()).await;
 
         assert!(matches!(result, Err(RequestError::NotFound(_))));
         // an unknown path must not be a way around authentication
         assert_eq!(rpcenv.get_auth_id().as_deref(), Some("tester@pam"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_caller_without_the_privilege_is_forbidden() {
+        use std::time::Duration;
+
+        let config = auth_config(true);
+        let mut rpcenv = RestEnvironment::new(RpcEnvironmentType::PUBLIC, Arc::clone(&config));
+        let start = Instant::now();
+        tokio::time::advance(Duration::from_millis(200)).await;
+
+        let pending = authorize(&SUPERUSER_ROUTER, &config, &mut rpcenv, start);
+        futures::pin_mut!(pending);
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(299)).await;
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(2)).await;
+        assert!(matches!(
+            futures::poll!(pending.as_mut()),
+            Poll::Ready(Err(RequestError::Forbidden(_)))
+        ));
     }
 }
