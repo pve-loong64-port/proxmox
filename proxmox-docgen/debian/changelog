@@ -1,3 +1,10 @@
+rust-proxmox-docgen (1.1.1-1) trixie; urgency=medium
+
+  * add dump_json_properties() to render a ReST type reference for JSON output,
+    keeping the fields every object has separate from those of oneOf variants.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 22 Sep 2026 14:14:31 +0200
+
 rust-proxmox-docgen (1.1.0-1) UNRELEASED; urgency=medium
 
   * dump allOf and oneOf schemas directly instead of transforming them
