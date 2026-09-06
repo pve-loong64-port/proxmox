@@ -1,3 +1,34 @@
+rust-proxmox-rest-server (1.1.1-1) trixie; urgency=medium
+
+  * logging: stop reporting redirects and unchanged responses as failures, and
+    log client errors such as missing files or expired tickets as warnings.
+
+  * api: run authentication and permission checks for all API endpoints
+    through one shared code path.
+
+  * proxy: accept quoted and unquoted Forwarded addresses with optional ports.
+    Use the last proxy element and reject unterminated quotes that could hide
+    the trusted address.
+
+  * authentication: measure failure delays before the check to mask its
+    runtime, excluding client-controlled login body reception from the delay.
+
+  * cookies: keep looking for the authentication cookie after a malformed pair.
+    A recovered ticket takes precedence over an API token in the same request.
+
+  * compression: honor zero weights in Accept-Encoding instead of compressing
+    responses when the client refuses deflate.
+
+  * worker tasks: only abort a task if its whole UPID matches. Previously, a
+    user allowed to stop their own tasks could stop another user's task
+    through a crafted UPID.
+
+  * fix #6267: task logs: recreate the task archive right after rotating it.
+    Previously, the cleanup following a rotation found no archive files, so on
+    busy systems old task logs and archives were not removed.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 23 Sep 2026 18:13:29 +0200
+
 rust-proxmox-rest-server (1.1.0-1) trixie; urgency=medium
 
   * accept deprecated property aliases in JSON request bodies by rewriting
