@@ -1,3 +1,18 @@
+rust-proxmox-network-api (1.0.6-1) trixie; urgency=medium
+
+  * fix #7329: interfaces: support the IPv6 auto method, so listing interfaces
+    no longer fails when the network configuration uses it. The method is only
+    accepted for IPv6.
+
+  * interfaces: preserve dhcp, auto, and loopback methods on unrelated updates
+    instead of changing them to manual and potentially dropping IPv6 settings.
+    Use manual for static configurations without an address or gateway.
+
+  * interfaces: reject a method other than static while an address or gateway
+    is set for that address family, instead of silently keeping it static.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 22 Sep 2026 14:14:31 +0200
+
 rust-proxmox-network-api (1.0.5-1) trixie; urgency=medium
 
   * update to proxmox-network-types 1.0.0.
