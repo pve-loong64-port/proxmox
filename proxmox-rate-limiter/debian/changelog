@@ -1,3 +1,16 @@
+rust-proxmox-rate-limiter (1.0.1-1) trixie; urgency=medium
+
+  * rate limiter: retain unused refill time so frequent updates do not stall
+    low-rate traffic limits.
+
+  * shared limiter: fix the mapping size on aarch64, where larger mutexes
+    prevented the limiter from opening.
+
+  * shared limiter: include the plain limiter dependency so the shared feature
+    builds on its own.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 22 Sep 2026 14:14:31 +0200
+
 rust-proxmox-rate-limiter (1.0.0-1) bookworm; urgency=medium
 
   * initial packaging

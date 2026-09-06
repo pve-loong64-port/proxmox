@@ -29,8 +29,8 @@ Provides:
  librust-proxmox-rate-limiter-1+default-dev (= ${binary:Version}),
  librust-proxmox-rate-limiter-1.0-dev (= ${binary:Version}),
  librust-proxmox-rate-limiter-1.0+default-dev (= ${binary:Version}),
- librust-proxmox-rate-limiter-1.0.0-dev (= ${binary:Version}),
- librust-proxmox-rate-limiter-1.0.0+default-dev (= ${binary:Version})
+ librust-proxmox-rate-limiter-1.0.1-dev (= ${binary:Version}),
+ librust-proxmox-rate-limiter-1.0.1+default-dev (= ${binary:Version})
 Description: Token bucket based traffic rate limiter implementation - Rust source code
  Source code for Debianized Rust crate "proxmox-rate-limiter"
 
@@ -44,7 +44,7 @@ Depends:
 Provides:
  librust-proxmox-rate-limiter-1+rate-limiter-dev (= ${binary:Version}),
  librust-proxmox-rate-limiter-1.0+rate-limiter-dev (= ${binary:Version}),
- librust-proxmox-rate-limiter-1.0.0+rate-limiter-dev (= ${binary:Version})
+ librust-proxmox-rate-limiter-1.0.1+rate-limiter-dev (= ${binary:Version})
 Description: Token bucket based traffic rate limiter implementation - feature "rate-limiter"
  This metapackage enables feature "rate-limiter" for the Rust proxmox-rate-
  limiter crate, by pulling in any additional dependencies needed by that
@@ -63,7 +63,7 @@ Depends:
 Provides:
  librust-proxmox-rate-limiter-1+shared-rate-limiter-dev (= ${binary:Version}),
  librust-proxmox-rate-limiter-1.0+shared-rate-limiter-dev (= ${binary:Version}),
- librust-proxmox-rate-limiter-1.0.0+shared-rate-limiter-dev (= ${binary:Version})
+ librust-proxmox-rate-limiter-1.0.1+shared-rate-limiter-dev (= ${binary:Version})
 Description: Token bucket based traffic rate limiter implementation - feature "shared-rate-limiter"
  This metapackage enables feature "shared-rate-limiter" for the Rust proxmox-
  rate-limiter crate, by pulling in any additional dependencies needed by that
