@@ -104,11 +104,7 @@ fn dump_schema(schema: &Schema) -> Value {
             }
         }
         Schema::Object(object_schema) => {
-            data = dump_property_schema(object_schema);
-            data["type"] = "object".into();
-            if let Some(default_key) = object_schema.default_key {
-                data["default_key"] = default_key.into();
-            }
+            data = dump_object_schema(object_schema);
         }
         Schema::Array(array_schema) => {
             data = json!({
@@ -124,37 +120,29 @@ fn dump_schema(schema: &Schema) -> Value {
             }
         }
         Schema::AllOf(alloff_schema) => {
-            data = dump_property_schema(alloff_schema);
-            data["type"] = "object".into();
+            data = dump_all_of_schema(alloff_schema);
         }
         Schema::OneOf(schema) => {
-            let mut type_schema = dump_schema(schema.type_schema());
-            if schema.type_property_entry.1 {
-                type_schema["optional"] = true.into();
-            }
-            data = json!({
-                "type": "object",
-                "description": schema.description,
-                "typeProperty": schema.type_property(),
-                "typeSchema": type_schema,
-            });
-            let mut variants = Vec::with_capacity(schema.list.len());
-            for (title, variant) in schema.list {
-                let mut entry = dump_schema(variant);
-                entry["title"] = (*title).into();
-                variants.push(entry);
-            }
-            data["oneOf"] = variants.into();
+            data = dump_one_of_schema(schema);
         }
     };
 
     data
 }
 
-fn dump_property_schema(param: &dyn ObjectSchemaType) -> Value {
+fn dump_parameter_schema(schema: &proxmox_schema::ParameterSchema) -> Value {
+    use proxmox_schema::ParameterSchema;
+    match schema {
+        ParameterSchema::Object(o) => dump_object_schema(o),
+        ParameterSchema::AllOf(o) => dump_all_of_schema(o),
+        ParameterSchema::OneOf(o) => dump_one_of_schema(o),
+    }
+}
+
+fn dump_object_schema(schema: &proxmox_schema::ObjectSchema) -> Value {
     let mut properties = json!({});
 
-    for (prop, optional, schema) in param.properties() {
+    for (prop, optional, schema) in schema.properties {
         let mut property = dump_schema(schema);
         if *optional {
             property["optional"] = 1.into();
@@ -162,13 +150,56 @@ fn dump_property_schema(param: &dyn ObjectSchemaType) -> Value {
         properties[prop] = property;
     }
 
-    let data = json!({
-        "description": param.description(),
-        "additionalProperties": param.additional_properties(),
+    let mut data = json!({
+        "type": "object",
+        "description": schema.description,
+        "additionalProperties": schema.additional_properties,
         "properties": properties,
     });
 
+    if let Some(default_key) = schema.default_key {
+        data["default_key"] = default_key.into();
+    }
+
     data
+}
+
+fn dump_all_of_schema(schema: &proxmox_schema::AllOfSchema) -> Value {
+    let all_of = schema
+        .list
+        .iter()
+        .copied()
+        .map(dump_schema)
+        .collect::<Vec<_>>();
+
+    json!({
+        "type": "object",
+        "description": schema.description,
+        "allOf": all_of,
+    })
+}
+
+fn dump_one_of_schema(schema: &proxmox_schema::OneOfSchema) -> Value {
+    let mut one_of = Vec::new();
+
+    for (type_name, schema) in schema.list {
+        let mut dump = dump_schema(schema);
+        dump["instance-type"] = Value::String(type_name.to_string());
+        one_of.push(dump);
+    }
+
+    let mut type_schema = dump_schema(schema.type_schema());
+    if schema.type_property_entry.1 {
+        type_schema["optional"] = true.into();
+    }
+
+    json!({
+        "type": "object",
+        "description": schema.description,
+        "type-property": schema.type_property(),
+        "type-property-schema": type_schema,
+        "oneOf": one_of,
+    })
 }
 
 fn dump_api_permission(permission: &Permission, privileges: &[(&str, u64)]) -> Value {
@@ -229,7 +260,7 @@ fn dump_api_method_schema(
         "description": api_method.parameters.description(),
     });
 
-    data["parameters"] = dump_property_schema(&api_method.parameters);
+    data["parameters"] = dump_parameter_schema(&api_method.parameters);
 
     let mut returns = dump_schema(api_method.returns.schema);
     if api_method.returns.optional {
