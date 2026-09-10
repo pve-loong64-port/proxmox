@@ -110,8 +110,14 @@ pub struct SectionConfig {
 
 enum ParseState<'a> {
     BeforeHeader,
-    InsideSection(&'a SectionConfigPlugin, String, Value),
+    InsideSection(InsideSection<'a>),
     InsideUnknownSection(String, String, Value),
+}
+
+struct InsideSection<'a> {
+    plugin: &'a SectionConfigPlugin,
+    section_id: String,
+    config: Value,
 }
 
 /// Interface to manipulate configuration data
@@ -485,8 +491,11 @@ impl SectionConfig {
                                             err.to_string()
                                         );
                                     }
-                                    state =
-                                        ParseState::InsideSection(plugin, section_id, section_data);
+                                    state = ParseState::InsideSection(InsideSection {
+                                        plugin,
+                                        section_id,
+                                        config: section_data,
+                                    });
                                 } else if self.allow_unknown_sections {
                                     let section_data = if let Some(type_key) = self.type_key {
                                         json!({type_key: section_type})
@@ -505,7 +514,10 @@ impl SectionConfig {
                                 bail!("syntax error (expected header)");
                             }
                         }
-                        ParseState::InsideSection(plugin, ref mut section_id, ref mut config) => {
+                        ParseState::InsideSection(ref mut inside) => {
+                            let plugin = inside.plugin;
+                            let section_id = &inside.section_id;
+                            let config = &mut inside.config;
                             if line.trim().is_empty() {
                                 // finish section
                                 plugin.properties.canonicalize_aliases(config)?;
@@ -592,7 +604,10 @@ impl SectionConfig {
 
                 match state {
                     ParseState::BeforeHeader => {}
-                    ParseState::InsideSection(plugin, ref mut section_id, ref mut config) => {
+                    ParseState::InsideSection(ref mut inside) => {
+                        let plugin = inside.plugin;
+                        let section_id = &inside.section_id;
+                        let config = &mut inside.config;
                         // finish section
                         plugin.properties.canonicalize_aliases(config)?;
                         test_required_properties(config, plugin.properties, &plugin.id_property)?;
