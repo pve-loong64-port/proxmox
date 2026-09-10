@@ -434,27 +434,6 @@ impl SectionConfig {
     ) -> Result<SectionConfigData, Error> {
         let mut state = ParseState::BeforeHeader;
 
-        let test_required_properties = |value: &Value,
-                                        schema: &(dyn ObjectSchemaType + Send + Sync),
-                                        id_property: &Option<String>|
-         -> Result<(), Error> {
-            for (name, optional, _prop_schema) in schema.properties() {
-                if let Some(id_property) = id_property
-                    && name == id_property
-                {
-                    // the id_property is the section header, skip for requirement check
-                    continue;
-                }
-                if !*optional && value[name] == Value::Null {
-                    return Err(format_err!(
-                        "property '{}' is missing and it is not optional.",
-                        name
-                    ));
-                }
-            }
-            Ok(())
-        };
-
         let mut line_no = 0;
 
         try_block!({
@@ -521,10 +500,10 @@ impl SectionConfig {
                             if line.trim().is_empty() {
                                 // finish section
                                 plugin.properties.canonicalize_aliases(config)?;
-                                test_required_properties(
+                                Self::test_required_properties(
                                     config,
                                     plugin.properties,
-                                    &plugin.id_property,
+                                    plugin.id_property.as_deref(),
                                 )?;
                                 if let Some(id_property) = &plugin.id_property {
                                     config[id_property] = Value::from(section_id.clone());
@@ -610,7 +589,11 @@ impl SectionConfig {
                         let config = &mut inside.config;
                         // finish section
                         plugin.properties.canonicalize_aliases(config)?;
-                        test_required_properties(config, plugin.properties, &plugin.id_property)?;
+                        Self::test_required_properties(
+                            config,
+                            plugin.properties,
+                            plugin.id_property.as_deref(),
+                        )?;
                         if let Some(id_property) = &plugin.id_property {
                             config[id_property] = Value::from(section_id.clone());
                         }
@@ -635,6 +618,28 @@ impl SectionConfig {
             Ok(result)
         })
         .map_err(|e: Error| format_err!("parsing {:?} failed: {}", filename.as_ref(), e))
+    }
+
+    fn test_required_properties(
+        value: &Value,
+        schema: &dyn ObjectSchemaType,
+        id_property: Option<&str>,
+    ) -> Result<(), Error> {
+        for (name, optional, _prop_schema) in schema.properties() {
+            if let Some(id_property) = id_property
+                && *name == id_property
+            {
+                // the id_property is the section header, skip for requirement check
+                continue;
+            }
+            if !*optional && value[name] == Value::Null {
+                return Err(format_err!(
+                    "property '{}' is missing and it is not optional.",
+                    name
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn default_format_section_header(
