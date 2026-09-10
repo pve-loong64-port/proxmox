@@ -20,7 +20,7 @@ impl TarEntry {
     }
 }
 
-pub struct OciTarImage<R: Read + Seek> {
+pub(crate) struct OciTarImage<R: Read + Seek> {
     reader: R,
     entries: HashMap<PathBuf, TarEntry>,
     image_index: ImageIndex,
@@ -56,10 +56,6 @@ impl<R: Read + Seek> OciTarImage<R> {
         } else {
             Err(OciSpecError::Other("Missing index.json file".into()))
         }
-    }
-
-    pub fn image_index(&self) -> &ImageIndex {
-        &self.image_index
     }
 
     fn get_blob_entry(&self, digest: &Digest) -> Option<TarEntry> {
