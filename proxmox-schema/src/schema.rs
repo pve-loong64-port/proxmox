@@ -850,7 +850,7 @@ impl ObjectSchema {
         Schema::Object(self)
     }
 
-    pub fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    pub fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         let key = self.lookup_alias(key).unwrap_or(key);
         if let Ok(ind) = self
             .properties
@@ -993,7 +993,7 @@ impl AllOfSchema {
         Schema::AllOf(self)
     }
 
-    pub fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    pub fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         for entry in self.list {
             if let Some(v) = entry
                 .any_object()
@@ -1189,7 +1189,7 @@ impl OneOfSchema {
         self.type_property_entry.2
     }
 
-    pub fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    pub fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         if key == self.type_property() {
             return Some((false, self.type_schema()));
         }
@@ -1207,7 +1207,7 @@ impl OneOfSchema {
         None
     }
 
-    pub fn lookup_variant(&self, name: &str) -> Option<&Schema> {
+    pub fn lookup_variant(&self, name: &str) -> Option<&'static Schema> {
         Some(
             self.list[self
                 .list
@@ -1274,7 +1274,7 @@ fn rename_aliases_to_canonicals(
 /// Beside [`ObjectSchema`] we also have an [`AllOfSchema`] which also represents objects.
 pub trait ObjectSchemaType: private::Sealed + Send + Sync {
     fn description(&self) -> &'static str;
-    fn lookup(&self, key: &str) -> Option<(bool, &Schema)>;
+    fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)>;
     fn properties(&self) -> ObjectPropertyIterator;
     fn additional_properties(&self) -> bool;
     fn default_key(&self) -> Option<&'static str>;
@@ -1403,7 +1403,7 @@ impl ObjectSchemaType for ObjectSchema {
         self.description
     }
 
-    fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         ObjectSchema::lookup(self, key)
     }
 
@@ -1458,7 +1458,7 @@ impl ObjectSchemaType for AllOfSchema {
         self.description
     }
 
-    fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         AllOfSchema::lookup(self, key)
     }
 
@@ -1558,7 +1558,7 @@ impl ObjectSchemaType for OneOfSchema {
         self.description
     }
 
-    fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         OneOfSchema::lookup(self, key)
     }
 
@@ -2219,7 +2219,7 @@ impl ObjectSchemaType for ParameterSchema {
         }
     }
 
-    fn lookup(&self, key: &str) -> Option<(bool, &Schema)> {
+    fn lookup(&self, key: &str) -> Option<(bool, &'static Schema)> {
         match self {
             ParameterSchema::Object(o) => o.lookup(key),
             ParameterSchema::AllOf(o) => o.lookup(key),
