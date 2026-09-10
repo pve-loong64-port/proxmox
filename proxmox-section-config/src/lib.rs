@@ -78,17 +78,9 @@ impl SectionConfigPlugin {
         self.properties
     }
 
-    pub fn get_id_schema(&self) -> Option<&Schema> {
-        match &self.id_property {
-            Some(id_prop) => {
-                if let Some((_, schema)) = self.properties.lookup(id_prop) {
-                    Some(schema)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        }
+    pub fn get_id_schema(&self) -> Option<&'static Schema> {
+        let id_prop = self.id_property.as_deref()?;
+        Some(self.properties.lookup(id_prop)?.1)
     }
 }
 
