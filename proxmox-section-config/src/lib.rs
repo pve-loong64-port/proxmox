@@ -495,22 +495,9 @@ impl SectionConfig {
                         }
                         ParseState::InsideSection(ref mut inside) => {
                             let plugin = inside.plugin;
-                            let section_id = &inside.section_id;
                             let config = &mut inside.config;
                             if line.trim().is_empty() {
-                                // finish section
-                                plugin.properties.canonicalize_aliases(config)?;
-                                Self::test_required_properties(
-                                    config,
-                                    plugin.properties,
-                                    plugin.id_property.as_deref(),
-                                )?;
-                                if let Some(id_property) = &plugin.id_property {
-                                    config[id_property] = Value::from(section_id.clone());
-                                }
-                                result.set_data(section_id, &plugin.type_name, config.take())?;
-                                result.record_order(section_id);
-
+                                Self::finish_section(&mut result, inside)?;
                                 state = ParseState::BeforeHeader;
                                 continue;
                             }
@@ -584,21 +571,7 @@ impl SectionConfig {
                 match state {
                     ParseState::BeforeHeader => {}
                     ParseState::InsideSection(ref mut inside) => {
-                        let plugin = inside.plugin;
-                        let section_id = &inside.section_id;
-                        let config = &mut inside.config;
-                        // finish section
-                        plugin.properties.canonicalize_aliases(config)?;
-                        Self::test_required_properties(
-                            config,
-                            plugin.properties,
-                            plugin.id_property.as_deref(),
-                        )?;
-                        if let Some(id_property) = &plugin.id_property {
-                            config[id_property] = Value::from(section_id.clone());
-                        }
-                        result.set_data(section_id, &plugin.type_name, config)?;
-                        result.record_order(section_id);
+                        Self::finish_section(&mut result, inside)?;
                     }
                     ParseState::InsideUnknownSection(
                         ref section_type,
@@ -639,6 +612,24 @@ impl SectionConfig {
                 ));
             }
         }
+        Ok(())
+    }
+
+    fn finish_section(
+        result: &mut SectionConfigData,
+        inside: &mut InsideSection<'_>,
+    ) -> Result<(), Error> {
+        let plugin = inside.plugin;
+        let section_id = &inside.section_id;
+        let config = &mut inside.config;
+
+        plugin.properties.canonicalize_aliases(config)?;
+        Self::test_required_properties(config, plugin.properties, plugin.id_property.as_deref())?;
+        if let Some(id_property) = &plugin.id_property {
+            config[id_property] = Value::from(section_id.clone());
+        }
+        result.set_data(section_id, &plugin.type_name, config)?;
+        result.record_order(section_id);
         Ok(())
     }
 
