@@ -291,7 +291,8 @@ impl ApiType for FqdnConfigContainer {
 /// `additionalProperties: true` object schema for it.
 #[derive(Clone, Default, Deserialize, Debug, Serialize, PartialEq)]
 pub struct FqdnConfigContainer {
-    fqdn: FqdnConfig,
+    /// FQDN to set for the installed system.
+    pub fqdn: FqdnConfig,
 }
 
 impl From<FqdnConfig> for FqdnConfigContainer {
