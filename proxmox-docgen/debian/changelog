@@ -1,3 +1,9 @@
+rust-proxmox-docgen (1.1.0-1) UNRELEASED; urgency=medium
+
+  * dump allOf and oneOf schemas directly instead of transforming them
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 11 Sep 2026 10:44:01 +0200
+
 rust-proxmox-docgen (1.0.1-1) trixie; urgency=medium
 
   * add support for the new unstable flag.
