@@ -119,8 +119,20 @@ pub async fn order_certificate(
     info!("Creating CSR");
 
     let csr = proxmox_acme::util::Csr::generate(&identifiers, &Default::default())?;
+    let certificate = finalize_order(&mut acme, &order.location, &csr.data).await?;
+
+    Ok(Some(OrderedCertificate {
+        certificate,
+        private_key_pem: csr.private_key_pem,
+    }))
+}
+
+async fn finalize_order(
+    acme: &mut AcmeClient,
+    order_url: &str,
+    csr: &[u8],
+) -> Result<Vec<u8>, Error> {
     let mut finalize_error_cnt = 0u8;
-    let order_url = &order.location;
     let mut order;
     loop {
         use proxmox_acme::order::Status;
@@ -134,7 +146,7 @@ pub async fn order_certificate(
                     .finalize
                     .as_deref()
                     .ok_or_else(|| format_err!("missing 'finalize' URL in order"))?;
-                if let Err(err) = acme.finalize(finalize, &csr.data).await {
+                if let Err(err) = acme.finalize(finalize, csr).await {
                     if finalize_error_cnt >= 5 {
                         return Err(err);
                     }
@@ -149,7 +161,7 @@ pub async fn order_certificate(
                     .finalize
                     .as_deref()
                     .ok_or_else(|| format_err!("missing 'finalize' URL in order"))?;
-                acme.finalize(finalize, &csr.data).await?;
+                acme.finalize(finalize, csr).await?;
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
             Status::Processing => {
@@ -174,10 +186,7 @@ pub async fn order_certificate(
         )
         .await?;
 
-    Ok(Some(OrderedCertificate {
-        certificate: certificate.to_vec(),
-        private_key_pem: csr.private_key_pem,
-    }))
+    Ok(certificate.to_vec())
 }
 
 async fn request_validation(
