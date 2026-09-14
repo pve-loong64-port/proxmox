@@ -100,7 +100,11 @@ pub async fn order_certificate(
             .setup(&mut acme, &auth, domain_config, Arc::clone(&worker))
             .await?;
 
-        let result = request_validation(&mut acme, auth_url, validation_url).await;
+        let result = tokio::select! {
+            biased;
+            _ = worker.abort_future() => Err(format_err!("abort requested - aborting task")),
+            result = request_validation(&mut acme, auth_url, validation_url) => result,
+        };
 
         if let Err(err) = plugin_cfg
             .teardown(&mut acme, &auth, domain_config, Arc::clone(&worker))
@@ -119,7 +123,11 @@ pub async fn order_certificate(
     info!("Creating CSR");
 
     let csr = proxmox_acme::util::Csr::generate(&identifiers, &Default::default())?;
-    let certificate = finalize_order(&mut acme, &order.location, &csr.data).await?;
+    let certificate = tokio::select! {
+        biased;
+        _ = worker.abort_future() => bail!("abort requested - aborting task"),
+        result = finalize_order(&mut acme, &order.location, &csr.data) => result?,
+    };
 
     Ok(Some(OrderedCertificate {
         certificate,
