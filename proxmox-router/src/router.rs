@@ -11,12 +11,13 @@ use http::{Method, Response};
 #[cfg(feature = "server")]
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
+use proxmox_const_utils::byte_string_eq;
 #[cfg(feature = "server")]
 use proxmox_http::Body;
 use serde::Serialize;
 use serde_json::Value;
 
-use proxmox_schema::{ObjectSchema, ParameterSchema, ReturnType, Schema};
+use proxmox_schema::{AllOfSchema, ObjectSchema, OneOfSchema, ParameterSchema, ReturnType, Schema};
 
 use super::Permission;
 use crate::RpcEnvironment;
@@ -831,6 +832,128 @@ impl std::fmt::Debug for ApiMethod {
     }
 }
 
+// const helpers to check privilege parameters
+
+const fn object_schema_has_parameter(object: &ObjectSchema, name: &[u8]) -> bool {
+    // additional properties are not statically known, so any name could exist
+    if object.additional_properties {
+        return true;
+    }
+    let mut i = 0;
+    while i < object.properties.len() {
+        if byte_string_eq(object.properties[i].0.as_bytes(), name) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn all_of_schema_has_parameter(all_of: &AllOfSchema, name: &[u8]) -> bool {
+    let mut i = 0;
+    while i < all_of.list.len() {
+        if schema_has_parameter(all_of.list[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn one_of_schema_has_parameter(one_of: &OneOfSchema, name: &[u8]) -> bool {
+    if byte_string_eq(one_of.type_property_entry.0.as_bytes(), name) {
+        return true;
+    }
+    let mut i = 0;
+    while i < one_of.list.len() {
+        if schema_has_parameter(one_of.list[i].1, name) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn schema_has_parameter(schema: &Schema, name: &[u8]) -> bool {
+    match schema {
+        Schema::Object(object) => object_schema_has_parameter(object, name),
+        Schema::AllOf(all_of) => all_of_schema_has_parameter(all_of, name),
+        Schema::OneOf(one_of) => one_of_schema_has_parameter(one_of, name),
+        _ => false,
+    }
+}
+
+const fn parameter_exists(parameters: ParameterSchema, name: &[u8]) -> bool {
+    match parameters {
+        ParameterSchema::Object(object) => object_schema_has_parameter(object, name),
+        ParameterSchema::AllOf(all_of) => all_of_schema_has_parameter(all_of, name),
+        ParameterSchema::OneOf(one_of) => one_of_schema_has_parameter(one_of, name),
+    }
+}
+
+// mirrors the splitting done by check_api_permission: a component can contain multiple '/'
+// separated parts, each of which may be a '{name}' parameter reference
+const fn check_privilege_path_components(component: &str, parameters: ParameterSchema) {
+    let bytes = component.as_bytes();
+    // early return for strings that can't interpolate
+    if bytes.len() < 2 {
+        return;
+    }
+    let mut component_start = 0;
+    let mut pos = 0;
+    while pos <= bytes.len() {
+        if pos == bytes.len() || bytes[pos] == b'/' {
+            let component_len = pos - component_start;
+            if component_len >= 2 && bytes[component_start] == b'{' && bytes[pos - 1] == b'}' {
+                if component_len == 2 {
+                    panic!("empty parameter declaration");
+                }
+                // double split_at because range slicing is not const
+                let name = bytes.split_at(pos - 1).0.split_at(component_start + 1).1;
+                if !parameter_exists(parameters, name) {
+                    panic!(
+                        "privilege path references a parameter that does not exist in the method's \
+                        parameter schema"
+                    );
+                }
+            }
+            component_start = pos + 1;
+        }
+        pos += 1;
+    }
+}
+
+const fn assert_path_parameters_exist(perm: &Permission, parameters: ParameterSchema) {
+    match perm {
+        Permission::WithParam(name, permission) => {
+            if !parameter_exists(parameters, name.as_bytes()) {
+                panic!("given user parameter does not exist");
+            }
+            assert_path_parameters_exist(permission, parameters)
+        }
+        Permission::UserParam(name) => {
+            if !parameter_exists(parameters, name.as_bytes()) {
+                panic!("given user parameter does not exist");
+            }
+        }
+        Permission::Privilege(paths, _, _) => {
+            let mut i = 0;
+            while i < paths.len() {
+                check_privilege_path_components(paths[i], parameters);
+                i += 1;
+            }
+        }
+        Permission::And(permissions) | Permission::Or(permissions) => {
+            let mut i = 0;
+            while i < permissions.len() {
+                assert_path_parameters_exist(permissions[i], parameters);
+                i += 1;
+            }
+        }
+        _ => (),
+    }
+}
+
 impl ApiMethod {
     pub const fn new_full(handler: &'static ApiHandler, parameters: ParameterSchema) -> Self {
         Self {
@@ -890,16 +1013,126 @@ impl ApiMethod {
         self
     }
 
+    /// Set the access permissions.
+    ///
+    /// This asserts that every '{name}' parameter reference in `Privilege` permission paths, and
+    /// the parameters in `UserParam` and `WithParam` exists in the method's parameter schema,
+    /// since such a parameter could otherwise never match at runtime. Since API methods are usually
+    /// built in a const context, a violation is a compile time error.
     pub const fn access(
         mut self,
         description: Option<&'static str>,
         permission: &'static Permission,
     ) -> Self {
+        assert_path_parameters_exist(permission, self.parameters);
+
         self.access = ApiAccess {
             description,
             permission,
         };
 
         self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use proxmox_schema::StringSchema;
+
+    const STRING_SCHEMA: Schema = StringSchema::new("test").schema();
+
+    const PARAMETERS: ObjectSchema = ObjectSchema::new(
+        "test parameters",
+        &[
+            ("bar", true, &STRING_SCHEMA),
+            ("foo", false, &STRING_SCHEMA),
+        ],
+    );
+
+    const ADDITIONAL_PARAMETERS: ObjectSchema =
+        ObjectSchema::new("test parameters", &[]).additional_properties(true);
+
+    // compile time check that valid parameter references are accepted
+    const _: ApiMethod = ApiMethod::new_dummy(&PARAMETERS).access(
+        None,
+        &Permission::And(&[
+            &Permission::Privilege(&["foo", "{foo}", "{bar}"], 1, true),
+            &Permission::Privilege(&["foo", "{foo}/{bar}"], 1, true),
+            &Permission::WithParam(
+                "foo",
+                &Permission::Or(&[&Permission::Privilege(&["foo", "{foo}"], 1, true)]),
+            ),
+            &Permission::Privilege(&["/"], 1, true),
+            &Permission::Privilege(&["/foo"], 1, true),
+        ]),
+    );
+
+    #[test]
+    #[should_panic(expected = "privilege path references a parameter")]
+    fn missing_privilege_path_parameter() {
+        let _ = ApiMethod::new_dummy(&PARAMETERS)
+            .access(None, &Permission::Privilege(&["foo", "{baz}"], 1, true));
+    }
+
+    #[test]
+    #[should_panic(expected = "given user parameter does not exist")]
+    fn missing_privilege_user_parameter() {
+        let _ = ApiMethod::new_dummy(&PARAMETERS).access(
+            None,
+            &Permission::WithParam(
+                "not-existing",
+                &Permission::Privilege(&["foo", "{baz}"], 1, true),
+            ),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "given user parameter does not exist")]
+    fn missing_user_parameter() {
+        let _ =
+            ApiMethod::new_dummy(&PARAMETERS).access(None, &Permission::UserParam("not-existing"));
+    }
+
+    #[test]
+    #[should_panic(expected = "empty parameter declaration")]
+    fn missing_privilege_path_parameter_name() {
+        let _ = ApiMethod::new_dummy(&PARAMETERS)
+            .access(None, &Permission::Privilege(&["foo", "{}"], 1, true));
+    }
+
+    #[test]
+    #[should_panic(expected = "privilege path references a parameter")]
+    fn missing_parameter_in_combined_component() {
+        let _ = ApiMethod::new_dummy(&PARAMETERS).access(
+            None,
+            &Permission::Or(&[&Permission::Privilege(
+                &["datastore", "{foo}/{baz}"],
+                0b01,
+                true,
+            )]),
+        );
+    }
+
+    #[test]
+    fn malformed_parameter_in_combined_component() {
+        // should work, components are not enclosed in brackets properly so no interpolation should
+        // be done
+        let _ = ApiMethod::new_dummy(&PARAMETERS).access(
+            None,
+            &Permission::Or(&[&Permission::Privilege(&["foo", "bar/{baz/}"], 1, true)]),
+        );
+
+        let _ = ApiMethod::new_dummy(&PARAMETERS).access(
+            None,
+            &Permission::Or(&[&Permission::Privilege(&["foo", "{bar/baz}/"], 1, true)]),
+        );
+    }
+
+    #[test]
+    fn additional_properties_allow_any_parameter() {
+        let _ = ApiMethod::new_dummy(&ADDITIONAL_PARAMETERS)
+            .access(None, &Permission::Privilege(&["foo", "{baz}"], 1, true));
     }
 }
