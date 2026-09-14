@@ -16,6 +16,8 @@ use proxmox_rest_server::WorkerTask;
 use crate::CertificateInfo;
 use crate::types::{AcmeConfig, AcmeDomain};
 
+const ACME_POLL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
 pub async fn revoke_certificate(acme_config: &AcmeConfig, certificate: &[u8]) -> Result<(), Error> {
     let mut acme = super::account_config::load_account_config(&acme_config.account)
         .await?
@@ -103,6 +105,9 @@ pub async fn order_certificate(
         let result = tokio::select! {
             biased;
             _ = worker.abort_future() => Err(format_err!("abort requested - aborting task")),
+            _ = tokio::time::sleep(ACME_POLL_TIMEOUT) => {
+                Err(format_err!("ACME validation for '{domain}' timed out"))
+            }
             result = request_validation(&mut acme, auth_url, validation_url) => result,
         };
 
@@ -126,6 +131,7 @@ pub async fn order_certificate(
     let certificate = tokio::select! {
         biased;
         _ = worker.abort_future() => bail!("abort requested - aborting task"),
+        _ = tokio::time::sleep(ACME_POLL_TIMEOUT) => bail!("ACME order finalization timed out"),
         result = finalize_order(&mut acme, &order.location, &csr.data) => result?,
     };
 
