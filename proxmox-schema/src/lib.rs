@@ -36,5 +36,3 @@ pub mod upid;
 
 #[cfg(feature = "api-types")]
 pub mod api_types;
-
-pub(crate) mod const_test_utils;

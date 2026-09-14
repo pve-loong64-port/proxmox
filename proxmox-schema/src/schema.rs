@@ -655,7 +655,7 @@ const fn assert_properties_sorted(properties: SchemaPropertyMap) {
     while i != properties.len() {
         let cur = properties[i].0;
         if let Some(prev) = prev {
-            match crate::const_test_utils::byte_string_cmp(prev.as_bytes(), cur.as_bytes()) {
+            match proxmox_const_utils::byte_string_cmp(prev.as_bytes(), cur.as_bytes()) {
                 Ordering::Greater => panic!("object schema properties must be sorted"),
                 Ordering::Equal => panic!("duplicate object schema properties not allowed"),
                 Ordering::Less => (),
@@ -672,7 +672,7 @@ const fn property_map_contains(properties: SchemaPropertyMap, needle: &'static s
     let mut i = 0;
     while i != properties.len() {
         if let Ordering::Equal =
-            crate::const_test_utils::byte_string_cmp(properties[i].0.as_bytes(), needle.as_bytes())
+            proxmox_const_utils::byte_string_cmp(properties[i].0.as_bytes(), needle.as_bytes())
         {
             return true;
         }
@@ -688,7 +688,7 @@ const fn assert_key_not_alias(key: &str, aliases: PropertyAliasMap) {
     while i != aliases.len() {
         let (alias, _) = aliases[i];
         if let Ordering::Equal =
-            crate::const_test_utils::byte_string_cmp(alias.as_bytes(), key.as_bytes())
+            proxmox_const_utils::byte_string_cmp(alias.as_bytes(), key.as_bytes())
         {
             panic!("key must reference a canonical property, not an alias");
         }
@@ -704,7 +704,7 @@ const fn assert_property_aliases_valid(aliases: PropertyAliasMap, properties: Sc
     while i != aliases.len() {
         let (alias, target) = aliases[i];
         if let Some(prev) = prev {
-            match crate::const_test_utils::byte_string_cmp(prev.as_bytes(), alias.as_bytes()) {
+            match proxmox_const_utils::byte_string_cmp(prev.as_bytes(), alias.as_bytes()) {
                 Ordering::Greater => panic!("property aliases must be sorted by alias name"),
                 Ordering::Equal => panic!("duplicate property alias not allowed"),
                 Ordering::Less => (),
@@ -1050,7 +1050,7 @@ const fn assert_one_of_list_is_sorted(list: &[(&str, &Schema)]) {
     while i != list.len() {
         let cur = list[i].0;
         if let Some(prev) = prev {
-            match crate::const_test_utils::byte_string_cmp(prev.as_bytes(), cur.as_bytes()) {
+            match proxmox_const_utils::byte_string_cmp(prev.as_bytes(), cur.as_bytes()) {
                 Ordering::Greater => panic!("oneOf variant list must be sorted"),
                 Ordering::Equal => panic!("multiple variants of the same type"),
                 Ordering::Less => (),
