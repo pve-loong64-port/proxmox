@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{File, read_dir, remove_dir_all, remove_file};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -22,7 +22,7 @@ const OPAQUE_WHITEOUT_NAME: &str = ".wh..wh..opq";
 fn compute_digest<R: Read, H: Digest>(
     mut reader: R,
     mut hasher: H,
-) -> std::io::Result<GenericArray<u8, H::OutputSize>> {
+) -> io::Result<GenericArray<u8, H::OutputSize>> {
     let mut buf = proxmox_io::boxed::zeroed(32768);
 
     loop {
@@ -35,7 +35,7 @@ fn compute_digest<R: Read, H: Digest>(
     }
 }
 
-fn compute_sha256<R: Read>(reader: R) -> std::io::Result<oci_spec::image::Sha256Digest> {
+fn compute_sha256<R: Read>(reader: R) -> io::Result<oci_spec::image::Sha256Digest> {
     let digest = compute_digest(reader, Sha256::new())?;
     Ok(oci_spec::image::Sha256Digest::from_str(&format!("{digest:x}")).expect("valid digest"))
 }
@@ -128,7 +128,7 @@ pub enum ParseError {
     #[error("Wrong media type")]
     WrongMediaType,
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     #[error("Unsupported CPU architecture")]
     UnsupportedArchitecture,
     #[error("Missing image config")]
@@ -173,7 +173,7 @@ pub enum ExtractError {
     #[error("Layer file {0} mentioned in image manifest is missing")]
     MissingLayerFile(oci_spec::image::Digest),
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     #[error("Layer has wrong media type: {0}")]
     WrongMediaType(String),
 }
@@ -196,7 +196,7 @@ fn extract_image_rootfs<R: Read + Seek, P: AsRef<Path>>(
             .open_blob(layer_descriptor.digest())
             .ok_or(ExtractError::MissingLayerFile(layer_digest))?;
 
-        type DecodeFn<T> = Box<dyn for<'a> Fn(&'a mut T) -> std::io::Result<Box<dyn Read + 'a>>>;
+        type DecodeFn<T> = Box<dyn for<'a> Fn(&'a mut T) -> io::Result<Box<dyn Read + 'a>>>;
         let decode_fn: DecodeFn<OciTarImageBlob<R>> = match layer_descriptor.media_type() {
             MediaType::ImageLayer | MediaType::ImageLayerNonDistributable => {
                 Box::new(|file| Ok(Box::new(file)))
@@ -232,7 +232,7 @@ fn extract_image_rootfs<R: Read + Seek, P: AsRef<Path>>(
 }
 
 /// Apply whiteouts on previous layers
-fn apply_whiteouts<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> std::io::Result<()> {
+fn apply_whiteouts<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> io::Result<()> {
     let mut archive = Archive::new(reader);
 
     for entry in archive.entries()? {
@@ -275,7 +275,7 @@ fn apply_whiteouts<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> s
     Ok(())
 }
 
-fn extract_archive<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> std::io::Result<()> {
+fn extract_archive<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> io::Result<()> {
     let mut archive = Archive::new(reader);
     archive.set_preserve_ownerships(true);
     archive.set_preserve_permissions(true);
@@ -335,7 +335,7 @@ fn extract_archive<R: Read, P: AsRef<Path>>(reader: &mut R, target_path: P) -> s
     Ok(())
 }
 
-fn remove_path(path: PathBuf) -> std::io::Result<()> {
+fn remove_path(path: PathBuf) -> io::Result<()> {
     if path.metadata()?.is_dir() {
         remove_dir_all(path)
     } else {
