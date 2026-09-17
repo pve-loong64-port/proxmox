@@ -46,7 +46,6 @@ unicode-width ="0.2"
 rustyline = { version = "14", optional = true }
 libc = { workspace = true, optional = true }
 
-proxmox-const-utils.workspace = true
 proxmox-http = { workspace = true, optional = true }
 proxmox-http-error.workspace = true
 proxmox-schema.workspace = true

@@ -527,3 +527,31 @@ fn test_property_aliases_in_all_of() {
     assert_eq!(body["mode"], "fast");
     assert!(body.get("legacy-mode").is_none());
 }
+
+mod one_of_type_property_clash {
+    use proxmox_schema::{ObjectSchema, OneOfSchema, Schema, StringSchema};
+
+    const SCHEMA_A: Schema = ObjectSchema::new(
+        "A.",
+        &[("ty", false, &StringSchema::new("Type clash.").schema())],
+    )
+    .schema();
+    const SCHEMA_B: Schema = ObjectSchema::new(
+        "B.",
+        &[("prop", false, &StringSchema::new("A property.").schema())],
+    )
+    .schema();
+    const TYPE_SCHEMA: Schema = StringSchema::new("The type property.").schema();
+
+    #[test]
+    #[should_panic(
+        expected = "a oneOf variant contains a property with the same name as the type property"
+    )]
+    fn type_property_in_variant() {
+        let _ = OneOfSchema::new(
+            "Test.",
+            &("ty", false, &TYPE_SCHEMA),
+            &[("A", &SCHEMA_A), ("B", &SCHEMA_B)],
+        );
+    }
+}

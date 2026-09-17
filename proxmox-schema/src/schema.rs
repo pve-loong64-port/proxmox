@@ -951,6 +951,24 @@ impl ObjectSchema {
         self.key_alias_info = Some(key_alias_info);
         self
     }
+
+    /// Check whether the schema contains a specific parameter.
+    /// This is meant for compile time checks and not as public API.
+    #[doc(hidden)]
+    pub const fn const_has_parameter(&self, name: &[u8], additional_properties: bool) -> bool {
+        // additional properties are not statically known, so any name could exist
+        if additional_properties && self.additional_properties {
+            return true;
+        }
+        let mut i = 0;
+        while i < self.properties.len() {
+            if proxmox_const_utils::byte_string_eq(self.properties[i].0.as_bytes(), name) {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
 }
 
 /// Combines multiple *object* schemas into one.
@@ -1018,6 +1036,20 @@ impl AllOfSchema {
     ) -> Result<Value, ParameterError> {
         ParameterSchema::from(self).parse_parameter_strings(data, test_required)
     }
+
+    /// Check whether the schema contains a specific parameter.
+    /// This is meant for compile time checks and not as public API.
+    #[doc(hidden)]
+    pub const fn const_has_parameter(&self, name: &[u8], additional_properties: bool) -> bool {
+        let mut i = 0;
+        while i < self.list.len() {
+            if self.list[i].const_has_parameter(name, additional_properties) {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
 }
 
 /// An object schema which is basically like a rust enum: exactly one variant may match.
@@ -1069,6 +1101,17 @@ const fn assert_only_objects_in_one_of(list: &'static [(&'static str, &'static S
             Schema::AllOf(sub) => assert_only_objects_in_all_of(sub.list),
             Schema::OneOf(sub) => assert_only_objects_in_one_of(sub.list),
             _ => panic!("non-object schema in one-of schema"),
+        }
+        i += 1;
+    }
+}
+
+const fn assert_no_variant_contains(list: &'static [(&'static str, &'static Schema)], name: &str) {
+    let name = name.as_bytes();
+    let mut i = 0;
+    while i != list.len() {
+        if list[i].1.const_has_parameter(name, false) {
+            panic!("a oneOf variant contains a property with the same name as the type property");
         }
         i += 1;
     }
@@ -1170,6 +1213,7 @@ impl OneOfSchema {
     ) -> Self {
         assert_one_of_list_is_sorted(list);
         assert_only_objects_in_one_of(list);
+        assert_no_variant_contains(list, type_property_entry.0);
         Self {
             description,
             type_property_entry,
@@ -1227,6 +1271,26 @@ impl OneOfSchema {
         test_required: bool,
     ) -> Result<Value, ParameterError> {
         ParameterSchema::from(self).parse_parameter_strings(data, test_required)
+    }
+
+    /// Check whether the schema contains a specific parameter.
+    /// This is meant for compile time checks and not as public API.
+    #[doc(hidden)]
+    pub const fn const_has_parameter(&self, name: &[u8], additional_properties: bool) -> bool {
+        if proxmox_const_utils::byte_string_eq(self.type_property_entry.0.as_bytes(), name) {
+            return true;
+        }
+        let mut i = 0;
+        while i < self.list.len() {
+            if self.list[i]
+                .1
+                .const_has_parameter(name, additional_properties)
+            {
+                return true;
+            }
+            i += 1;
+        }
+        false
     }
 }
 
@@ -2034,6 +2098,18 @@ impl Schema {
             _ => panic!("unwrap_one_of_schema_cloned on different schema"),
         }
     }
+
+    /// Check whether the schema contains a specific parameter.
+    /// This is meant for compile time checks and not as public API.
+    #[doc(hidden)]
+    pub const fn const_has_parameter(&self, name: &[u8], additional_properties: bool) -> bool {
+        match self {
+            Schema::Object(object) => object.const_has_parameter(name, additional_properties),
+            Schema::AllOf(all_of) => all_of.const_has_parameter(name, additional_properties),
+            Schema::OneOf(one_of) => one_of.const_has_parameter(name, additional_properties),
+            _ => false,
+        }
+    }
 }
 
 /// A string enum entry. An enum entry must have a value and a description.
@@ -2207,6 +2283,17 @@ impl ParameterSchema {
         test_required: bool,
     ) -> Result<Value, ParameterError> {
         do_parse_parameter_strings(self, data, test_required)
+    }
+
+    /// Check whether the schema contains a specific parameter.
+    /// This is meant for compile time checks and not as public API.
+    #[doc(hidden)]
+    pub const fn const_has_parameter(&self, name: &[u8], additional_properties: bool) -> bool {
+        match self {
+            Self::Object(o) => o.const_has_parameter(name, additional_properties),
+            Self::AllOf(o) => o.const_has_parameter(name, additional_properties),
+            Self::OneOf(o) => o.const_has_parameter(name, additional_properties),
+        }
     }
 }
 

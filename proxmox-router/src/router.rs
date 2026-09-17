@@ -11,13 +11,12 @@ use http::{Method, Response};
 #[cfg(feature = "server")]
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
-use proxmox_const_utils::byte_string_eq;
 #[cfg(feature = "server")]
 use proxmox_http::Body;
 use serde::Serialize;
 use serde_json::Value;
 
-use proxmox_schema::{AllOfSchema, ObjectSchema, OneOfSchema, ParameterSchema, ReturnType, Schema};
+use proxmox_schema::{ObjectSchema, ParameterSchema, ReturnType, Schema};
 
 use super::Permission;
 use crate::RpcEnvironment;
@@ -834,63 +833,6 @@ impl std::fmt::Debug for ApiMethod {
 
 // const helpers to check privilege parameters
 
-const fn object_schema_has_parameter(object: &ObjectSchema, name: &[u8]) -> bool {
-    // additional properties are not statically known, so any name could exist
-    if object.additional_properties {
-        return true;
-    }
-    let mut i = 0;
-    while i < object.properties.len() {
-        if byte_string_eq(object.properties[i].0.as_bytes(), name) {
-            return true;
-        }
-        i += 1;
-    }
-    false
-}
-
-const fn all_of_schema_has_parameter(all_of: &AllOfSchema, name: &[u8]) -> bool {
-    let mut i = 0;
-    while i < all_of.list.len() {
-        if schema_has_parameter(all_of.list[i], name) {
-            return true;
-        }
-        i += 1;
-    }
-    false
-}
-
-const fn one_of_schema_has_parameter(one_of: &OneOfSchema, name: &[u8]) -> bool {
-    if byte_string_eq(one_of.type_property_entry.0.as_bytes(), name) {
-        return true;
-    }
-    let mut i = 0;
-    while i < one_of.list.len() {
-        if schema_has_parameter(one_of.list[i].1, name) {
-            return true;
-        }
-        i += 1;
-    }
-    false
-}
-
-const fn schema_has_parameter(schema: &Schema, name: &[u8]) -> bool {
-    match schema {
-        Schema::Object(object) => object_schema_has_parameter(object, name),
-        Schema::AllOf(all_of) => all_of_schema_has_parameter(all_of, name),
-        Schema::OneOf(one_of) => one_of_schema_has_parameter(one_of, name),
-        _ => false,
-    }
-}
-
-const fn parameter_exists(parameters: ParameterSchema, name: &[u8]) -> bool {
-    match parameters {
-        ParameterSchema::Object(object) => object_schema_has_parameter(object, name),
-        ParameterSchema::AllOf(all_of) => all_of_schema_has_parameter(all_of, name),
-        ParameterSchema::OneOf(one_of) => one_of_schema_has_parameter(one_of, name),
-    }
-}
-
 // mirrors the splitting done by check_api_permission: a component can contain multiple '/'
 // separated parts, each of which may be a '{name}' parameter reference
 const fn check_privilege_path_components(component: &str, parameters: ParameterSchema) {
@@ -910,7 +852,7 @@ const fn check_privilege_path_components(component: &str, parameters: ParameterS
                 }
                 // double split_at because range slicing is not const
                 let name = bytes.split_at(pos - 1).0.split_at(component_start + 1).1;
-                if !parameter_exists(parameters, name) {
+                if !parameters.const_has_parameter(name, true) {
                     panic!(
                         "privilege path references a parameter that does not exist in the method's \
                         parameter schema"
@@ -926,13 +868,13 @@ const fn check_privilege_path_components(component: &str, parameters: ParameterS
 const fn assert_path_parameters_exist(perm: &Permission, parameters: ParameterSchema) {
     match perm {
         Permission::WithParam(name, permission) => {
-            if !parameter_exists(parameters, name.as_bytes()) {
+            if !parameters.const_has_parameter(name.as_bytes(), true) {
                 panic!("given user parameter does not exist");
             }
             assert_path_parameters_exist(permission, parameters)
         }
         Permission::UserParam(name) => {
-            if !parameter_exists(parameters, name.as_bytes()) {
+            if !parameters.const_has_parameter(name.as_bytes(), true) {
                 panic!("given user parameter does not exist");
             }
         }
