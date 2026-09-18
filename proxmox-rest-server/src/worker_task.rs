@@ -1113,6 +1113,10 @@ pub async fn wait_for_local_worker(upid_str: &str) -> Result<(), Error> {
 /// Request abort of a local worker (if existing and running)
 pub fn abort_local_worker(upid: UPID) {
     if let Some(worker) = WORKER_TASK_LIST.lock().unwrap().get(&upid.task_id) {
+        if worker.upid != upid {
+            log::error!("UPID of task to be aborted does not match, skipping...");
+            return;
+        }
         worker.request_abort();
     }
 }
