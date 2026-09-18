@@ -526,11 +526,11 @@ fn parse_query_parameters<S: 'static + BuildHasher + Send>(
     Ok(params)
 }
 
-async fn get_request_parameters<S: 'static + BuildHasher + Send>(
+async fn get_request_parameters(
     param_schema: ParameterSchema,
     parts: &Parts,
     req_body: Incoming,
-    uri_param: HashMap<String, String, S>,
+    uri_param: HashMap<String, String>,
 ) -> Result<Value, Error> {
     let mut is_json = false;
 
@@ -681,13 +681,13 @@ fn handle_sync_stream_as_json_seq(
         .body(Body::wrap_stream(futures::stream::iter(iter)))?)
 }
 
-pub(crate) async fn handle_api_request<Env: RpcEnvironment, S: 'static + BuildHasher + Send>(
+pub(crate) async fn handle_api_request<Env: RpcEnvironment>(
     mut rpcenv: Env,
     info: &'static ApiMethod,
     formatter: Option<&'static dyn OutputFormatter>,
     parts: Parts,
     req_body: Incoming,
-    uri_param: HashMap<String, String, S>,
+    uri_param: HashMap<String, String>,
 ) -> Result<Response<Body>, Error> {
     let formatter = formatter.unwrap_or(crate::formatter::DIRECT_JSON_FORMATTER);
 
