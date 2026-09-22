@@ -348,7 +348,15 @@ fn log_response(
             None => "request failed",
         };
 
-        log::error!(
+        // A client error is the client's, like a request for a missing file or an expired
+        // ticket, and says nothing about the health of the server.
+        let level = if status.is_server_error() {
+            log::Level::Error
+        } else {
+            log::Level::Warn
+        };
+        log::log!(
+            level,
             "{method} {path}: {status} {reason}: [client {peer}] {message}",
             status = status.as_str(),
         );
