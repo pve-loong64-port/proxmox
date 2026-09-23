@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::io::Read;
+use std::panic::AssertUnwindSafe;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Error;
@@ -15,6 +17,8 @@ pub struct Client {
     timeout: Option<Duration>,
     http_status_as_error: Option<bool>,
     max_redirects: Option<u32>,
+    reuse_agent: bool,
+    agent: OnceLock<AssertUnwindSafe<ureq::Agent>>,
 }
 
 impl Client {
@@ -39,6 +43,7 @@ impl Client {
     /// Retry-After.
     pub fn with_http_status_as_error(mut self, enabled: bool) -> Self {
         self.http_status_as_error = Some(enabled);
+        self.agent.take();
         self
     }
 
@@ -46,10 +51,21 @@ impl Client {
     /// them, allowing callers to enforce an origin policy before sending another request.
     pub fn with_max_redirects(mut self, limit: u32) -> Self {
         self.max_redirects = Some(limit);
+        self.agent.take();
+        self
+    }
+
+    /// Reuse the transport agent and its connection pool across requests. Without this, each
+    /// request uses a fresh agent.
+    pub fn with_reused_agent(mut self) -> Self {
+        self.reuse_agent = true;
         self
     }
 
     fn agent(&self) -> Result<ureq::Agent, Error> {
+        if let Some(agent) = self.agent.get() {
+            return Ok(agent.0.clone());
+        }
         let mut builder = ureq::Agent::config_builder()
             .tls_config(
                 ureq::tls::TlsConfig::builder()
@@ -74,7 +90,13 @@ impl Client {
             builder = builder.max_redirects(limit);
         }
 
-        Ok(builder.build().into())
+        let agent = builder.build().into();
+        if self.reuse_agent {
+            // The agent exposes no mutable state to callers across an unwind boundary.
+            Ok(self.agent.get_or_init(|| AssertUnwindSafe(agent)).0.clone())
+        } else {
+            Ok(agent)
+        }
     }
 
     fn add_headers(
@@ -292,8 +314,15 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::thread::{self, JoinHandle};
     use std::time::Instant;
+
+    #[test]
+    fn client_preserves_auto_traits() {
+        fn assert_traits<T: Send + Sync + UnwindSafe + RefUnwindSafe>() {}
+        assert_traits::<Client>();
+    }
 
     /// Reruns the named test in a child process without proxy variables and returns true, or
     /// returns false inside that child, where the test runs itself.
@@ -468,5 +497,40 @@ mod tests {
             Some(ureq::Error::TooManyRedirects)
         ));
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn agent_cache_is_opt_in_and_reset_by_policy_changes() {
+        let client = client();
+        client.agent().unwrap();
+        assert!(client.agent.get().is_none());
+
+        let client = client.with_reused_agent();
+        client.agent().unwrap();
+        assert!(client.agent.get().is_some());
+        let client = client.with_http_status_as_error(false);
+        assert!(client.agent.get().is_none());
+        client.agent().unwrap();
+        let client = client.with_max_redirects(0);
+        assert!(client.agent.get().is_none());
+
+        let agent = client.agent().unwrap();
+        assert!(!agent.config().http_status_as_error());
+        assert_eq!(agent.config().max_redirects(), 0);
+        assert!(client.agent.get().is_some());
+    }
+
+    #[test]
+    fn only_reused_agents_keep_the_connection() {
+        if run_in_child_without_proxy_env("only_reused_agents_keep_the_connection") {
+            return;
+        }
+        const OK: &str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        for (client, connections) in [(client(), 2), (client().with_reused_agent(), 1)] {
+            let (url, worker) = fixture(&[OK, OK]);
+            assert_eq!(get(&client, &url).unwrap().body(), "ok");
+            assert_eq!(get(&client, &url).unwrap().body(), "ok");
+            assert_eq!(worker.join().unwrap(), connections);
+        }
     }
 }
