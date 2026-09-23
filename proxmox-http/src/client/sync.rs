@@ -13,13 +13,15 @@ use crate::HttpOptions;
 pub struct Client {
     options: HttpOptions,
     timeout: Option<Duration>,
+    http_status_as_error: Option<bool>,
+    max_redirects: Option<u32>,
 }
 
 impl Client {
     pub fn new(options: HttpOptions) -> Self {
         Self {
             options,
-            timeout: None,
+            ..Default::default()
         }
     }
 
@@ -27,7 +29,24 @@ impl Client {
         Self {
             options,
             timeout: Some(timeout),
+            ..Default::default()
         }
+    }
+
+    /// Select whether HTTP 4xx and 5xx statuses become errors.
+    ///
+    /// Defaults to true. Disable this to inspect error response headers and bodies, including
+    /// Retry-After.
+    pub fn with_http_status_as_error(mut self, enabled: bool) -> Self {
+        self.http_status_as_error = Some(enabled);
+        self
+    }
+
+    /// Limit automatically followed redirects. Zero returns redirect responses without following
+    /// them, allowing callers to enforce an origin policy before sending another request.
+    pub fn with_max_redirects(mut self, limit: u32) -> Self {
+        self.max_redirects = Some(limit);
+        self
     }
 
     fn agent(&self) -> Result<ureq::Agent, Error> {
@@ -46,6 +65,13 @@ impl Client {
 
         if let Some(proxy_config) = &self.options.proxy_config {
             builder = builder.proxy(Some(ureq::Proxy::new(&proxy_config.to_proxy_string()?)?));
+        }
+
+        if let Some(enabled) = self.http_status_as_error {
+            builder = builder.http_status_as_error(enabled);
+        }
+        if let Some(limit) = self.max_redirects {
+            builder = builder.max_redirects(limit);
         }
 
         Ok(builder.build().into())
@@ -258,5 +284,189 @@ impl HttpClient<Box<dyn Read>, Box<dyn Read>> for Client {
             .run(req.body(ureq::SendBody::from_owned_reader(body))?)
             .map_err(Error::from)
             .map(Self::convert_response_to_reader)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread::{self, JoinHandle};
+    use std::time::Instant;
+
+    /// Reruns the named test in a child process without proxy variables and returns true, or
+    /// returns false inside that child, where the test runs itself.
+    ///
+    /// ureq reads these variables for every agent, so a proxy set in the environment would receive
+    /// the loopback requests. Removing them in this process would race with tests reading the
+    /// environment on other threads.
+    fn run_in_child_without_proxy_env(test: &str) -> bool {
+        const CHILD: &str = "PROXMOX_HTTP_TEST_WITHOUT_PROXY";
+        if std::env::var_os(CHILD).is_some() {
+            return false;
+        }
+
+        // Test names are module paths without the crate name.
+        let (_, module) = module_path!().split_once("::").unwrap();
+        let test = format!("{module}::{test}");
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", &test]).env(CHILD, "1");
+        for name in [
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+        ] {
+            command.env_remove(name);
+        }
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // An unknown name runs no test and still exits successfully.
+        assert!(
+            output.status.success() && stdout.contains("test result: ok. 1 passed"),
+            "{test} without proxy variables:\n{stdout}{}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        true
+    }
+
+    fn accept(listener: &TcpListener) -> TcpStream {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    return stream;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "client did not connect");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept: {error}"),
+            }
+        }
+    }
+
+    /// Reads one request head, or returns false if the client closed the connection instead.
+    fn read_request_head(stream: &mut TcpStream) -> bool {
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if stream.read(&mut byte).unwrap() == 0 {
+                assert!(head.is_empty(), "connection closed within a request head");
+                return false;
+            }
+            head.push(byte[0]);
+            assert!(head.len() < 8192);
+        }
+        true
+    }
+
+    /// Serves the responses in order, on one connection as long as the client keeps it open. The
+    /// worker returns the number of accepted connections.
+    fn fixture(responses: &'static [&'static str]) -> (String, JoinHandle<usize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let worker = thread::spawn(move || {
+            let mut connections = 0;
+            let mut stream = None;
+            for response in responses {
+                loop {
+                    let current = stream.get_or_insert_with(|| {
+                        connections += 1;
+                        accept(&listener)
+                    });
+                    if read_request_head(current) {
+                        current.write_all(response.as_bytes()).unwrap();
+                        break;
+                    }
+                    stream = None;
+                }
+            }
+            connections
+        });
+        (url, worker)
+    }
+
+    fn client() -> Client {
+        Client::new_with_timeout(HttpOptions::default(), Duration::from_secs(2))
+    }
+
+    fn get(client: &Client, url: &str) -> Result<Response<String>, Error> {
+        <Client as HttpClient<String, String>>::get(client, url, None)
+    }
+
+    #[test]
+    fn status_errors_remain_the_default() {
+        if run_in_child_without_proxy_env("status_errors_remain_the_default") {
+            return;
+        }
+        let (url, worker) =
+            fixture(&["HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n"]);
+        let error = get(&client(), &url).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ureq::Error>(),
+            Some(ureq::Error::StatusCode(429))
+        ));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn error_responses_keep_status_headers_and_streaming_body() {
+        if run_in_child_without_proxy_env("error_responses_keep_status_headers_and_streaming_body")
+        {
+            return;
+        }
+        let (url, worker) = fixture(&[
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 5\r\nRetry-After: 9\r\n\r\nlater",
+        ]);
+        let client = client().with_http_status_as_error(false);
+        let response =
+            <Client as HttpClient<Box<dyn Read>, Box<dyn Read>>>::get(&client, &url, None).unwrap();
+        assert_eq!(response.status(), 429);
+        assert_eq!(response.headers()["retry-after"], "9");
+        let mut body = String::new();
+        response.into_body().read_to_string(&mut body).unwrap();
+        assert_eq!(body, "later");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn zero_redirects_returns_location_without_following_it() {
+        if run_in_child_without_proxy_env("zero_redirects_returns_location_without_following_it") {
+            return;
+        }
+        let (url, worker) =
+            fixture(&["HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: /target\r\n\r\n"]);
+        let response = get(&client().with_max_redirects(0), &url).unwrap();
+        assert_eq!(response.status(), 302);
+        assert_eq!(response.headers()["location"], "/target");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn finite_redirect_limit_stops_a_loop() {
+        if run_in_child_without_proxy_env("finite_redirect_limit_stops_a_loop") {
+            return;
+        }
+        const REDIRECT: &str =
+            "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: /again\r\n\r\n";
+        let (url, worker) = fixture(&[REDIRECT, REDIRECT]);
+        let error = get(&client().with_max_redirects(1), &url).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ureq::Error>(),
+            Some(ureq::Error::TooManyRedirects)
+        ));
+        worker.join().unwrap();
     }
 }
