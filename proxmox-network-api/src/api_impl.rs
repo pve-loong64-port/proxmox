@@ -41,6 +41,28 @@ fn method_for_address(
     }
 }
 
+/// Reject a method requested through the API that a configured address would override.
+///
+/// An address or gateway makes the address family `static`, see [`method_for_address`]. Any other
+/// method requested along with one would be replaced without notice, for example when switching an
+/// interface to `dhcp` without deleting its old static address.
+fn check_method_for_address(
+    requested: Option<NetworkConfigMethod>,
+    has_address: bool,
+    is_v6: bool,
+) -> Result<(), Error> {
+    if !has_address || matches!(requested, None | Some(NetworkConfigMethod::Static)) {
+        return Ok(());
+    }
+
+    let (method, cidr, gateway) = if is_v6 {
+        ("method6", "cidr6", "gateway6")
+    } else {
+        ("method", "cidr", "gateway")
+    };
+    bail!("'{method}' must be 'static' while '{cidr}' or '{gateway}' is set");
+}
+
 /// Create network interface configuration.
 pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), Error> {
     let interface_type = match config.interface_type {
@@ -169,14 +191,12 @@ pub fn create_interface(iface: String, config: InterfaceUpdater) -> Result<(), E
         ),
     }
 
-    interface.method = Some(method_for_address(
-        interface.method,
-        interface.cidr.is_some() || interface.gateway.is_some(),
-    ));
-    interface.method6 = Some(method_for_address(
-        interface.method6,
-        interface.cidr6.is_some() || interface.gateway6.is_some(),
-    ));
+    let has_address = interface.cidr.is_some() || interface.gateway.is_some();
+    let has_address6 = interface.cidr6.is_some() || interface.gateway6.is_some();
+    check_method_for_address(config.method, has_address, false)?;
+    check_method_for_address(config.method6, has_address6, true)?;
+    interface.method = Some(method_for_address(interface.method, has_address));
+    interface.method6 = Some(method_for_address(interface.method6, has_address6));
 
     network_config.interfaces.insert(iface, interface);
 
@@ -356,14 +376,12 @@ pub fn update_interface(
         interface.comments6 = update.comments6;
     }
 
-    interface.method = Some(method_for_address(
-        interface.method,
-        interface.cidr.is_some() || interface.gateway.is_some(),
-    ));
-    interface.method6 = Some(method_for_address(
-        interface.method6,
-        interface.cidr6.is_some() || interface.gateway6.is_some(),
-    ));
+    let has_address = interface.cidr.is_some() || interface.gateway.is_some();
+    let has_address6 = interface.cidr6.is_some() || interface.gateway6.is_some();
+    check_method_for_address(update.method, has_address, false)?;
+    check_method_for_address(update.method6, has_address6, true)?;
+    interface.method = Some(method_for_address(interface.method, has_address));
+    interface.method6 = Some(method_for_address(interface.method6, has_address6));
 
     if update.vlan_id.is_some() {
         interface.vlan_id = update.vlan_id;
@@ -425,6 +443,24 @@ mod tests {
         ] {
             assert!(check_v4_method(Some(method)).is_ok());
         }
+    }
+
+    #[test]
+    fn a_requested_method_that_an_address_would_override_is_rejected() {
+        for method in [
+            NetworkConfigMethod::Manual,
+            NetworkConfigMethod::DHCP,
+            NetworkConfigMethod::Loopback,
+            NetworkConfigMethod::Auto,
+        ] {
+            assert!(check_method_for_address(Some(method), true, false).is_err());
+            assert!(check_method_for_address(Some(method), true, true).is_err());
+            assert!(check_method_for_address(Some(method), false, true).is_ok());
+        }
+
+        let static_method = Some(NetworkConfigMethod::Static);
+        assert!(check_method_for_address(static_method, true, false).is_ok());
+        assert!(check_method_for_address(None, true, true).is_ok());
     }
 
     #[test]
