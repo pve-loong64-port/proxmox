@@ -303,6 +303,21 @@ pub fn rotate_task_log_archive(
 
     let mut rotated = logrotate.rotate(size_threshold)?;
 
+    // need to recreate base file after rotation
+    if rotated {
+        let options = setup
+            .file_opts
+            .perm(nix::sys::stat::Mode::from_bits_truncate(0o660));
+
+        atomic_open_or_create_file(
+            &setup.task_archive_fn,
+            OFlag::O_APPEND | OFlag::O_RDWR,
+            &[],
+            options,
+            false,
+        )?;
+    }
+
     if let Some(max_days) = max_days {
         // NOTE: not on exact day-boundary but close enough for what's done here
         let cutoff_time = proxmox_time::epoch_i64() - (max_days * 24 * 60 * 60) as i64;
