@@ -33,6 +33,7 @@ impl Init for WrapLimiter {
 }
 
 #[repr(C)]
+#[cfg(not(target_arch = "loongarch64"))]
 struct SharedRateLimiterData {
     magic: [u8; 8],
     tbf: SharedMutex<WrapLimiter>,
@@ -43,7 +44,23 @@ struct SharedRateLimiterData {
 
 // The mapping is shared with other processes, possibly running a different version of this crate,
 // so the size must not drift when any of the members change.
+#[cfg(not(target_arch = "loongarch64"))]
 const _: () = assert!(size_of::<SharedRateLimiterData>() == 4096);
+
+#[repr(C)]
+#[cfg(target_arch = "loongarch64")]
+struct SharedRateLimiterData {
+    magic: [u8; 8],
+    tbf: SharedMutex<WrapLimiter>,
+    // fill up to exactly one page, as `SharedMemory` needs a multiple of the page size. The mutex
+    // size depends on the architecture's `pthread_mutex_t`, so the padding cannot be hardcoded.
+    padding: [u8; 16384 - 8 - size_of::<SharedMutex<WrapLimiter>>()],
+}
+
+// The mapping is shared with other processes, possibly running a different version of this crate,
+// so the size must not drift when any of the members change.
+#[cfg(target_arch = "loongarch64")]
+const _: () = assert!(size_of::<SharedRateLimiterData>() == 16384);
 
 impl Init for SharedRateLimiterData {
     fn initialize(this: &mut MaybeUninit<Self>) {
