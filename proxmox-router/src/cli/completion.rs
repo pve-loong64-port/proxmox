@@ -112,7 +112,10 @@ fn get_simple_completion_do(
     arg_param: &[&str], // we remove done arguments
     args: &[String],
 ) -> Vec<String> {
-    //eprintln!("COMPL: {:?} {:?} {}", arg_param, args, args.len());
+    // Global option parsing can consume all arguments before positional completion.
+    if args.is_empty() {
+        return Vec::new();
+    }
 
     if !arg_param.is_empty() {
         let prop_name = arg_param[0];
@@ -163,9 +166,6 @@ fn get_simple_completion_do(
             // unknown arg_param - should never happen
             return Vec::new();
         }
-    }
-    if args.is_empty() {
-        return Vec::new();
     }
 
     // Try to parse all arguments but last, record args already done
@@ -625,6 +625,52 @@ mod test {
         completions.sort();
 
         assert_eq!((start, expect), (completion_start, completions));
+    }
+
+    #[test]
+    fn global_option_without_callback_leaves_no_positional_input() {
+        const METHOD: ApiMethod = ApiMethod::new(
+            &ApiHandler::Sync(&dummy_method),
+            &ObjectSchema::new(
+                "Files.",
+                &[(
+                    "files",
+                    true,
+                    &proxmox_schema::ArraySchema::new(
+                        "Files.",
+                        &StringSchema::new("File.").schema(),
+                    )
+                    .schema(),
+                )],
+            ),
+        );
+        const REQUIRED: ApiMethod = ApiMethod::new(
+            &ApiHandler::Sync(&dummy_method),
+            &ObjectSchema::new(
+                "File.",
+                &[("files", false, &StringSchema::new("File.").schema())],
+            ),
+        );
+        const OPTIONAL: ApiMethod = ApiMethod::new(
+            &ApiHandler::Sync(&dummy_method),
+            &ObjectSchema::new(
+                "File.",
+                &[("files", true, &StringSchema::new("File.").schema())],
+            ),
+        );
+        for method in [&METHOD, &REQUIRED, &OPTIONAL] {
+            let commands: CommandLineInterface = CliCommandMap::new()
+                .global_option(GlobalOptions::of::<GlobalOpts>())
+                .insert(
+                    "query",
+                    CliCommand::new(method)
+                        .arg_param(&["files"])
+                        .completion_cb("files", |_, _| vec!["candidate".into()]),
+                )
+                .into();
+            test_completions(&commands, "query --global ", 15, &[]);
+            test_completions(&commands, "query ", 6, &["candidate"]);
+        }
     }
 
     #[test]
