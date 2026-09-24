@@ -10,6 +10,36 @@ use http::Response;
 use crate::HttpClient;
 use crate::HttpOptions;
 
+/// Whether an error or its causes represent a request or streaming-read timeout.
+///
+/// This also recognizes transport errors wrapped by `std::io::Read`, so callers do not need to
+/// depend on the underlying HTTP implementation to distinguish deadlines from other failures.
+pub fn is_timeout(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    loop {
+        match error.downcast_ref::<ureq::Error>() {
+            Some(ureq::Error::Timeout(_)) => return true,
+            Some(ureq::Error::Io(inner)) => {
+                error = inner;
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(inner) = error.downcast_ref::<std::io::Error>() {
+            if inner.kind() == std::io::ErrorKind::TimedOut {
+                return true;
+            }
+            if let Some(source) = inner.get_ref() {
+                error = source;
+                continue;
+            }
+        }
+        let Some(source) = error.source() else {
+            return false;
+        };
+        error = source;
+    }
+}
+
 #[derive(Default)]
 /// Blocking HTTP client for usage with [`HttpClient`].
 pub struct Client {
@@ -317,6 +347,25 @@ mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::thread::{self, JoinHandle};
     use std::time::Instant;
+
+    #[test]
+    fn timeout_detection_handles_request_and_reader_error_wrappers() {
+        for error in [
+            ureq::Error::Timeout(ureq::Timeout::Global),
+            ureq::Error::Io(std::io::ErrorKind::TimedOut.into()),
+        ] {
+            let error = Error::new(error).context("request failed");
+            assert!(is_timeout(error.as_ref()));
+        }
+        let error = ureq::Error::Timeout(ureq::Timeout::RecvBody).into_io();
+        assert!(is_timeout(&error));
+        assert!(is_timeout(&std::io::Error::other(error)));
+        assert!(!is_timeout(&ureq::Error::StatusCode(408)));
+        assert!(!is_timeout(&std::io::Error::other("timeout")));
+        assert!(!is_timeout(&ureq::Error::Io(
+            std::io::ErrorKind::ConnectionReset.into()
+        )));
+    }
 
     #[test]
     fn client_preserves_auto_traits() {
