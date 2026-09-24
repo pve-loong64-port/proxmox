@@ -152,6 +152,7 @@ impl<'o, 'i> Cow3<'o, 'i, str> {
     }
 }
 
+/// FIXME: With rust 1.98 we can switch to `str.substr_range(substr)` instead.
 pub fn str_slice_to_range(original: &str, slice: &str) -> Option<Range<usize>> {
     let orig_addr = original.as_ptr() as usize;
     let slice_addr = slice.as_ptr() as usize;
