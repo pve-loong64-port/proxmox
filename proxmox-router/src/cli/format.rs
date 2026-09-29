@@ -422,9 +422,11 @@ fn generate_nested_usage_do<'cli>(
 
     for cmd in cmds {
         if !usage.is_empty() {
+            // Only the short format has a single line per command, the others would run the
+            // description of one command into the usage line of the next.
             if matches!(
                 format,
-                DocumentationFormat::ReST | DocumentationFormat::Long
+                DocumentationFormat::ReST | DocumentationFormat::Long | DocumentationFormat::Full
             ) {
                 usage.push_str("\n\n");
             } else {
@@ -657,6 +659,19 @@ mod tests {
             "expected an unqualified globals header in Full format, got: {usage:?}",
         );
         assert!(!usage.contains("``"), "no empty group name, got: {usage:?}");
+    }
+
+    #[test]
+    fn nested_usage_full_separates_commands_with_blank_line() {
+        let map = CliCommandMap::new()
+            .global_option(GlobalOptions::of::<DummyGlobals>())
+            .insert("bar", CliCommand::new(&API_METHOD_NOOP))
+            .insert("foo", CliCommand::new(&API_METHOD_NOOP));
+        let usage = generate_nested_usage("bin", &map, DocumentationFormat::Full);
+        assert!(
+            usage.contains("\n\nbin bar") && usage.contains("\n\nbin foo"),
+            "expected a blank line before every command, got: {usage:?}",
+        );
     }
 
     #[test]
