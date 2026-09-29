@@ -342,8 +342,13 @@ impl<'cli> UsageState<'cli> {
             // Qualify with the prefix so the line cannot be misread as belonging to the
             // adjacent per-command usage line. ReST/Full output already uses this scoping
             // ("Options available for command group ..."); Short keeps the same spirit
-            // with a tighter form.
-            let _ = write!(out, "Global options for `{prefix}`:");
+            // with a tighter form. The `help` command lists its usage lines without the binary
+            // name, so its prefix is empty for the top level, which needs no qualification.
+            if prefix.is_empty() {
+                out.push_str("Global options:");
+            } else {
+                let _ = write!(out, "Global options for `{prefix}`:");
+            }
             for (name, _optional, schema) in &names {
                 let type_text = get_schema_type_text(schema, ParameterDisplayStyle::Arg);
                 let _ = write!(out, " --{name} {type_text}");
@@ -354,7 +359,11 @@ impl<'cli> UsageState<'cli> {
             return out;
         }
 
-        let _ = write!(out, "Options available for command group ``{prefix}``:");
+        if prefix.is_empty() {
+            out.push_str("Options available for all commands:");
+        } else {
+            let _ = write!(out, "Options available for command group ``{prefix}``:");
+        }
         for opt in opts {
             let mut properties: Vec<_> = opt
                 .schema
@@ -628,6 +637,26 @@ mod tests {
             usage.contains("Global options for `bin group`: --config <string>"),
             "expected subgroup globals header to be qualified with its prefix, got: {usage:?}",
         );
+    }
+
+    #[test]
+    fn nested_usage_without_prefix_names_no_empty_group() {
+        // The `help` command renders the top level with an empty prefix, which must not show
+        // up as an empty group name.
+        let map = CliCommandMap::new()
+            .global_option(GlobalOptions::of::<DummyGlobals>())
+            .insert("foo", CliCommand::new(&API_METHOD_NOOP));
+        let usage = generate_nested_usage("", &map, DocumentationFormat::Short);
+        assert!(
+            usage.starts_with("Global options: --config <string>"),
+            "expected an unqualified globals header in Short format, got: {usage:?}",
+        );
+        let usage = generate_nested_usage("", &map, DocumentationFormat::Full);
+        assert!(
+            usage.starts_with("Options available for all commands:"),
+            "expected an unqualified globals header in Full format, got: {usage:?}",
+        );
+        assert!(!usage.contains("``"), "no empty group name, got: {usage:?}");
     }
 
     #[test]
