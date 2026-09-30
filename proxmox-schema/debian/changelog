@@ -1,3 +1,27 @@
+rust-proxmox-schema (5.4.0-1) trixie; urgency=medium
+
+  * oneOf: drop support for a plain string variant, added in 5.2.0. The
+    variants of a oneOf schema and the members of an allOf schema must be
+    object schemas, or allOf and oneOf schemas made of those. This is now
+    checked at compile time, so schemas using a string variant no longer
+    compile.
+
+  * oneOf: reject at compile time a variant with a property of the same name
+    as the type property, as the two would clash.
+
+  * return `&'static Schema` from the lookup methods of schemas and of the
+    `ObjectSchemaType` trait, as schemas are always static. A looked-up
+    schema can now be kept without borrowing the schema it came from.
+
+  * multi-line comments: check the whole value for control characters. The
+    pattern accepted any value with one line free of them, which includes
+    every value ending in a newline. Newlines and tabs stay allowed. A stored
+    comment with any other control character, for example in a Proxmox
+    Backup Server node description, must be edited before its configuration
+    can be saved again.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 30 Sep 2026 10:40:58 +0200
+
 rust-proxmox-schema (5.3.0-1) trixie; urgency=medium
 
   * add support for declaring deprecated property aliases on object schemas,
