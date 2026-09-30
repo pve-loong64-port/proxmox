@@ -1,3 +1,25 @@
+rust-proxmox-router (3.2.9-1) trixie; urgency=medium
+
+  * check at compile time that the parameters an API method's permission
+    refers to exist in its parameter schema: `{name}` components of
+    privilege paths and the parameters of `Permission::WithParam` and
+    `Permission::UserParam`. A missing parameter previously only showed up
+    at runtime, as a permission check that always failed with 403. Schemas
+    that allow additional properties are not checked.
+
+  * cli: help output:
+    - leave out the empty group name in the global options header of the
+      top-level `help` output, short and verbose, for example
+      "Global options for ``:".
+    - separate the commands in the verbose help with a blank line, so one
+      command's parameters no longer run into the next usage line.
+
+  * cli: fix a panic in shell completion of commands with a positional
+    parameter, when the last global option before the cursor has no
+    completion callback.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 30 Sep 2026 11:06:18 +0200
+
 rust-proxmox-router (3.2.8-1) trixie; urgency=medium
 
   * cli: accept deprecated property aliases from proxmox-schema 5.3 when
