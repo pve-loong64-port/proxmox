@@ -21,6 +21,9 @@ use journal::*;
 mod rrd_map;
 use rrd_map::*;
 
+#[cfg(test)]
+mod tests;
+
 /// RRD cache - keep RRD data in RAM, but write updates to disk
 ///
 /// This cache is designed to run as single instance (no concurrent

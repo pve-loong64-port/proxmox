@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -8,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::{Error, bail, format_err};
 use crossbeam_channel::Receiver;
-use nix::fcntl::OFlag;
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
 
 use proxmox_sys::fs::atomic_open_or_create_file;
 
@@ -80,6 +81,9 @@ pub struct JournalFileInfo {
 impl JournalState {
     pub(crate) fn new(config: Arc<CacheConfig>) -> Result<Self, Error> {
         let journal = JournalState::open_journal_writer(&config)?;
+        if let Err(err) = truncate_incomplete_entry(&journal) {
+            log::warn!("unable to check rrd journal for an incomplete entry - {err}");
+        }
         Ok(Self {
             config,
             journal,
@@ -102,7 +106,12 @@ impl JournalState {
         rel_path: &str,
     ) -> Result<(), Error> {
         let journal_entry = format!("{}:{}:{}:{}\n", time, value, dst as u8, rel_path);
-        self.journal.write_all(journal_entry.as_bytes())?;
+        if let Err(err) = self.journal.write_all(journal_entry.as_bytes()) {
+            if let Err(truncate_err) = truncate_incomplete_entry(&self.journal) {
+                log::warn!("unable to drop incomplete rrd journal entry - {truncate_err}");
+            }
+            return Err(err.into());
+        }
         Ok(())
     }
 
@@ -121,9 +130,17 @@ impl JournalState {
         let mut journal_path = config.basedir.clone();
         journal_path.push(RRD_JOURNAL_NAME);
 
-        let flags = OFlag::O_CLOEXEC | OFlag::O_WRONLY | OFlag::O_APPEND;
+        let flags = OFlag::O_CLOEXEC | OFlag::O_RDWR | OFlag::O_APPEND;
         let journal =
             atomic_open_or_create_file(&journal_path, flags, &[], config.file_options, false)?;
+
+        // Truncation does not reset the file offset. Enforce append mode even when the creation
+        // helper returns a newly created temporary file without the requested status flags.
+        let flags = OFlag::from_bits_truncate(fcntl(journal.as_raw_fd(), FcntlArg::F_GETFL)?);
+        fcntl(
+            journal.as_raw_fd(),
+            FcntlArg::F_SETFL(flags | OFlag::O_APPEND),
+        )?;
         Ok(journal)
     }
 
@@ -184,5 +201,136 @@ impl JournalState {
         }
         list.sort_unstable_by_key(|entry| entry.time);
         Ok(list)
+    }
+}
+
+/// Truncate the journal after its last complete entry, so that the next append cannot continue an
+/// entry left incomplete by a crash or failed write.
+fn truncate_incomplete_entry(journal: &File) -> Result<(), Error> {
+    let len = journal.metadata()?.len();
+    let mut buf = [0u8; 4096];
+    let mut end = len;
+
+    while end > 0 {
+        let start = end.saturating_sub(buf.len() as u64);
+        let chunk = &mut buf[..(end - start) as usize];
+        journal.read_exact_at(chunk, start)?;
+        if let Some(pos) = chunk.iter().rposition(|&b| b == b'\n') {
+            end = start + pos as u64 + 1;
+            break;
+        }
+        end = start;
+    }
+
+    if end < len {
+        let dropped = len - end;
+        log::warn!("dropping incomplete rrd journal entry ({dropped} bytes)");
+        journal.set_len(end)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::tests::TestDir;
+    use nix::libc;
+    use proxmox_sys::fs::CreateOptions;
+
+    #[test]
+    fn append_after_failed_write() {
+        // File size limits and signal handlers are process-wide, so isolate fault injection from
+        // other tests and their background threads.
+        const CHILD_ENV: &str = "PROXMOX_RRD_TEST_SHORT_WRITE";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cache::journal::tests::append_after_failed_write",
+                ])
+                .env(CHILD_ENV, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        let dir = TestDir::new();
+        let config = Arc::new(CacheConfig {
+            basedir: dir.0.clone(),
+            apply_interval: 1800.0,
+            file_options: CreateOptions::new(),
+            dir_options: CreateOptions::new(),
+        });
+        let mut state = JournalState::new(Arc::clone(&config)).unwrap();
+        check_failed_append(&mut state);
+        state.rotate_journal().unwrap();
+        check_failed_append(&mut state);
+        drop(state);
+        let mut state = JournalState::new(config).unwrap();
+        check_failed_append(&mut state);
+    }
+
+    fn check_failed_append(state: &mut JournalState) {
+        state
+            .append_journal_entry(1.0, 1.0, DataSourceType::Gauge, "host/cpu")
+            .unwrap();
+        let path = state.config.basedir.join(RRD_JOURNAL_NAME);
+        let mut expected = std::fs::read(&path).unwrap();
+
+        let result = unsafe {
+            let mut original: libc::rlimit = std::mem::zeroed();
+            assert_eq!(libc::getrlimit(libc::RLIMIT_FSIZE, &mut original), 0);
+            let handler = libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            assert_ne!(handler, libc::SIG_ERR);
+            let limit = libc::rlimit {
+                rlim_cur: expected.len() as libc::rlim_t + 5,
+                rlim_max: original.rlim_max,
+            };
+            assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+            let result = state.append_journal_entry(2.0, 2.0, DataSourceType::Gauge, "host/cpu");
+            assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &original), 0);
+            assert_ne!(libc::signal(libc::SIGXFSZ, handler), libc::SIG_ERR);
+            result
+        };
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), expected);
+
+        state
+            .append_journal_entry(3.0, 3.0, DataSourceType::Gauge, "host/cpu")
+            .unwrap();
+        expected.extend_from_slice(b"3:3:0:host/cpu\n");
+        let actual = std::fs::read(&path).unwrap();
+        assert_eq!(actual, expected);
+        for line in std::str::from_utf8(&actual).unwrap().lines() {
+            line.parse::<JournalEntry>().unwrap();
+        }
+    }
+
+    fn check_truncate(name: &str, data: &[u8], expected: &[u8]) {
+        let path = format!("./tests/testdata/journal-{name}.tmp");
+        std::fs::write(&path, data).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        truncate_incomplete_entry(&file).unwrap();
+        let result = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, expected, "{name}");
+    }
+
+    #[test]
+    fn truncate_incomplete_journal_entry() {
+        let complete: &[u8] = b"1789798791.1:0.5:0:host/cpu\n1789798801.2:0.7:0:host/cpu\n";
+
+        check_truncate("empty", b"", b"");
+        check_truncate("complete", complete, complete);
+        check_truncate("cut-time", &[complete, b"178979880"].concat(), complete);
+        check_truncate("cut-path", &[complete, b"1:2:0:datas"].concat(), complete);
+        check_truncate("no-newline", b"178979880", b"");
+        check_truncate("zero-tail", &[complete, &[0u8; 5000]].concat(), complete);
     }
 }
