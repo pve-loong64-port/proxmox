@@ -16,6 +16,7 @@ mod permission;
 mod router;
 mod rpc_environment;
 mod serializable_return;
+mod shared_state;
 
 #[doc(inline)]
 #[cfg(feature = "server")]
@@ -25,6 +26,7 @@ pub use permission::*;
 pub use router::*;
 pub use rpc_environment::{RpcEnvironment, RpcEnvironmentType};
 pub use serializable_return::SerializableReturn;
+pub use shared_state::SharedStateRegistry;
 
 // make list_subdirs_api_method! work without an explicit proxmox-schema dependency:
 #[doc(hidden)]

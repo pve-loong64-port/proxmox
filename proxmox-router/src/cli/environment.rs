@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use proxmox_schema::ApiType;
 
-use crate::{RpcEnvironment, RpcEnvironmentType};
+use crate::{RpcEnvironment, RpcEnvironmentType, SharedStateRegistry};
 
 /// [`RpcEnvironment`] implementation for command line tools.
 ///
@@ -15,12 +15,18 @@ use crate::{RpcEnvironment, RpcEnvironmentType};
 pub struct CliEnvironment {
     result_attributes: Value,
     auth_id: Option<String>,
+    shared_state_registry: Option<SharedStateRegistry>,
     pub(crate) global_options: HashMap<TypeId, Box<dyn Any + Send + Sync + 'static>>,
 }
 
 impl CliEnvironment {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    /// Set the shared state registry for this environment.
+    pub fn set_shared_state_registry(&mut self, registry: SharedStateRegistry) {
+        self.shared_state_registry = Some(registry);
     }
 
     /// Borrow a global option by type.
@@ -97,5 +103,9 @@ impl RpcEnvironment for CliEnvironment {
 
     fn get_auth_id(&self) -> Option<String> {
         self.auth_id.clone()
+    }
+
+    fn shared_state(&self) -> Option<&SharedStateRegistry> {
+        self.shared_state_registry.as_ref()
     }
 }

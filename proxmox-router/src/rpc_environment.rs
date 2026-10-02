@@ -2,6 +2,8 @@ use std::any::Any;
 
 use serde_json::Value;
 
+use crate::SharedStateRegistry;
+
 /// Helper to get around `RpcEnvironment: Sized`
 pub trait AsAny {
     fn as_any(&self) -> &(dyn Any + Send);
@@ -44,6 +46,11 @@ pub trait RpcEnvironment: Any + AsAny + Send {
     /// Get the (real) client IP
     fn get_client_ip(&self) -> Option<std::net::SocketAddr> {
         None // dummy no-op implementation, as most environments don't need this
+    }
+
+    /// Return a reference to the shared state registry.
+    fn shared_state(&self) -> Option<&SharedStateRegistry> {
+        None
     }
 }
 
