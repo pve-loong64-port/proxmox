@@ -3,8 +3,10 @@
 //! This has to perform quite a few things: infer types from parameters, deal with optional types
 //! and defaults, expose parameter and return value schema to the public, and finally create the
 //! wrapper function converting from a json Value hash to the parameters listed in the function
-//! signature, while recognizing specially handling `RPCEnvironment` and `ApiMethod` parameters.
+//! signature, while recognizing specially handling `RPCEnvironment` and `ApiMethod` parameters as
+//! well as parameters marked with `#[state]`.
 
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 
@@ -350,12 +352,100 @@ enum ParameterType {
     Value,
     ApiMethod,
     RpcEnv,
+    State(StateParameter),
     Normal(NormalParameter),
 }
 
 struct NormalParameter {
     ty: syn::Type,
     entry: ObjectEntry,
+}
+
+/// A parameter marked with `#[state]`.
+#[derive(Debug)]
+struct StateParameter {
+    /// The type to look up in the shared state registry.
+    ty: syn::Type,
+
+    /// Whether the parameter is an `Option`, in which case an unavailable value is not an error.
+    optional: bool,
+}
+
+impl StateParameter {
+    /// The registry is keyed by type. `Option<T>` is not the same type as `T` itself, so it
+    /// is removed to get at the type to look up. `Option` parameters
+    /// gets `None` instead of failing if no value of the type is available.
+    fn new(pat_type: &syn::PatType) -> Self {
+        let (ty, optional) = match util::is_option_type(&pat_type.ty) {
+            Some(ty) => (ty, true),
+            None => (&*pat_type.ty, false),
+        };
+
+        if let syn::Type::Reference(r) = ty {
+            error!(r => "'state' parameters cannot be taken by reference");
+        }
+
+        Self {
+            ty: ty.clone(),
+            optional,
+        }
+    }
+}
+
+fn param_attributes_mut(input: &mut syn::FnArg) -> &mut Vec<syn::Attribute> {
+    match input {
+        syn::FnArg::Receiver(receiver) => &mut receiver.attrs,
+        syn::FnArg::Typed(pat_type) => &mut pat_type.attrs,
+    }
+}
+
+fn is_state_attribute(attr: &syn::Attribute) -> bool {
+    attr.style == syn::AttrStyle::Outer && attr.path().is_ident("state")
+}
+
+/// Removes `#[state]` attributes from the function's parameters and returns the
+/// positions of the parameters which had one.
+///
+/// The attribute only has meaning to this macro, so it has to be stripped before the function is
+/// emitted again. Other attributes are preserved.
+fn take_state_attributes(sig: &mut syn::Signature) -> HashSet<usize> {
+    let mut state_param_indices = HashSet::new();
+
+    for (index, input) in sig.inputs.iter_mut().enumerate() {
+        let attrs = param_attributes_mut(input);
+
+        for attr in mem::take(attrs) {
+            if !is_state_attribute(&attr) {
+                attrs.push(attr);
+                continue;
+            }
+
+            if !matches!(attr.meta, syn::Meta::Path(_)) {
+                error!(&attr.meta => "'state' attribute does not take any data");
+            }
+
+            state_param_indices.insert(index);
+        }
+    }
+
+    state_param_indices
+}
+
+/// Removes `#[state]` attributes from a function without any diagnostics.
+///
+/// Used for the copy of the original function which is emitted alongside a fatal error, where the
+/// leftover attributes would only add confusing follow-up errors due to `state` not being in
+/// scope.
+pub(crate) fn strip_state_attributes(item: TokenStream) -> TokenStream {
+    let Ok(mut func) = syn::parse2::<syn::ItemFn>(item.clone()) else {
+        return item;
+    };
+
+    for input in func.sig.inputs.iter_mut() {
+        param_attributes_mut(input).retain(|attr| !is_state_attribute(attr));
+    }
+
+    func.into_token_stream()
 }
 
 fn check_input_type(input: &syn::FnArg) -> Result<(&syn::PatType, &syn::PatIdent), syn::Error> {
@@ -375,6 +465,8 @@ fn check_input_type(input: &syn::FnArg) -> Result<(&syn::PatType, &syn::PatIdent
 }
 
 fn handle_function_signature(method_info: &mut MethodInfo) -> Result<Ident, Error> {
+    let state_params = take_state_attributes(&mut method_info.func.sig);
+
     let sig = &method_info.func.sig;
 
     let mut api_method_param = None;
@@ -383,7 +475,11 @@ fn handle_function_signature(method_info: &mut MethodInfo) -> Result<Ident, Erro
 
     let mut param_list = Vec::<(FieldName, ParameterType)>::new();
 
-    for input in sig.inputs.iter() {
+    for (index, input) in sig.inputs.iter().enumerate() {
+        if state_params.contains(&index) {
+            continue;
+        }
+
         let (pat_type, pat) = match check_input_type(input) {
             Ok(input) => input,
             Err(err) => {
@@ -411,7 +507,7 @@ fn handle_function_signature(method_info: &mut MethodInfo) -> Result<Ident, Erro
         };
     }
 
-    for input in sig.inputs.iter() {
+    for (index, input) in sig.inputs.iter().enumerate() {
         let (pat_type, pat) = match check_input_type(input) {
             Ok(input) => input,
             Err(_err) => continue, // we already produced errors above,
@@ -422,17 +518,20 @@ fn handle_function_signature(method_info: &mut MethodInfo) -> Result<Ident, Erro
         // values, and our 2 fixed function parameters: `&ApiMethod` and `&mut dyn RpcEnvironment`.
         //
         // Our strategy is as follows:
-        //     1) See if the parameter name also appears in the input schema. In this case we
+        //     1) See if the parameter was marked with `#[state]`. Such parameters are filled in
+        //        from the environment's shared state registry and are not part of the schema.
+        //
+        //     2) See if the parameter name also appears in the input schema. In this case we
         //        assume that we want the parameter to be extracted from the `Value` and passed
         //        directly to the function.
         //
-        //     2) Check the parameter type for `&ApiMethod` and remember its position (since we may
+        //     3) Check the parameter type for `&ApiMethod` and remember its position (since we may
         //        need to reorder it!)
         //
-        //     3) Check the parameter type for `&dyn RpcEnvironment` and remember its position
+        //     4) Check the parameter type for `&dyn RpcEnvironment` and remember its position
         //        (since we may need to reorder it!).
         //
-        //     4) Check for a `Value` or `serde_json::Value` parameter. This becomes the
+        //     5) Check for a `Value` or `serde_json::Value` parameter. This becomes the
         //        "catch-all" parameter and only 1 may exist.
         //        Note that we may still use further `Value` parameters if they have been
         //        explicitly named in the `input_schema`. However, only 1 unnamed `Value` parameter
@@ -440,11 +539,25 @@ fn handle_function_signature(method_info: &mut MethodInfo) -> Result<Ident, Erro
         //        If no such parameter exists, we automatically fail the function if the `Value` is
         //        not empty after extracting the parameters.
         //
-        //     5) Finally, if none of the above conditions are met, we do not know what to do and
+        //     6) Finally, if none of the above conditions are met, we do not know what to do and
         //        bail out with an error.
         let pat_ident = pat.ident.unraw();
         let mut param_name: FieldName = pat_ident.clone().into();
-        let param_type = if let Some(entry) = method_info
+        let param_type = if state_params.contains(&index) {
+            if method_info
+                .input_schema
+                .find_obj_property_by_ident(&pat_ident.to_string())
+                .is_some()
+            {
+                error!(
+                    pat_type => "'state' parameter '{}' must not appear in the input schema",
+                    pat_ident,
+                );
+                continue;
+            }
+
+            ParameterType::State(StateParameter::new(pat_type))
+        } else if let Some(entry) = method_info
             .input_schema
             .find_obj_property_by_ident(&pat_ident.to_string())
         {
@@ -563,6 +676,9 @@ fn create_wrapper_function(
                     span,
                     &mut method_info.default_consts,
                 )?;
+            }
+            ParameterType::State(param) => {
+                extract_state_parameter(param, &mut body, &mut args, name, span)?;
             }
         }
     }
@@ -819,6 +935,51 @@ fn extract_normal_parameter(
             }
         }
     }
+
+    args.extend(quote_spanned! { span => #arg_name, });
+
+    Ok(())
+}
+
+fn extract_state_parameter(
+    param: StateParameter,
+    body: &mut TokenStream,
+    args: &mut TokenStream,
+    name: FieldName,
+    span: Span,
+) -> Result<(), Error> {
+    let name_str = syn::LitStr::new(name.as_str(), span);
+    let arg_name = Ident::new(&format!("state_arg_{}", name.as_ident()), span);
+    let ty = param.ty;
+
+    let lookup = if param.optional {
+        // an unavailable value is not an error here, which includes an environment without any
+        // registry at all.
+        quote_spanned! { span =>
+            let #arg_name = rpc_env_param
+                .shared_state()
+                .and_then(|shared_state| shared_state.lookup::<#ty>());
+        }
+    } else {
+        quote_spanned! { span =>
+            let #arg_name = rpc_env_param
+                .shared_state()
+                .ok_or_else(|| ::anyhow::format_err!(
+                    "router has no shared state set up",
+                ))?
+                .lookup::<#ty>()
+                .ok_or_else(|| ::anyhow::format_err!(
+                    "shared state type '{}' for parameter '{}' not registered",
+                    ::std::any::type_name::<#ty>(),
+                    #name_str,
+                ))?;
+        }
+    };
+
+    body.extend(quote_spanned! { span =>
+        #[allow(non_snake_case)]
+        #lookup
+    });
 
     args.extend(quote_spanned! { span => #arg_name, });
 

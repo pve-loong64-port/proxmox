@@ -210,6 +210,51 @@ fn router_do(item: TokenStream) -> Result<TokenStream, Error> {
     }
     ```
 
+    # Shared state parameters.
+
+    Parameters marked with `#[state]` are not part of the API schema. Instead of being extracted
+    from the API input, they are filled in from the `SharedStateRegistry` of the environment
+    the handler is called with. The handler receives a clone of the value registered for the
+    parameter's type and fails if no value of that type was registered:
+
+    ```no_run
+    # use proxmox_api_macro::api;
+    # use anyhow::Error;
+    #[derive(Clone)]
+    struct AuthContext {
+        realm: String,
+    }
+
+    #[api]
+    /// Show which realm the daemon was configured with.
+    fn print_realm(#[state] auth: AuthContext) -> Result<(), Error> {
+        println!("realm: {}", auth.realm);
+
+        Ok(())
+    }
+    ```
+
+    State arguments can also be taken as an `Option`, which turns an unavailable value from an
+    error into a `None`. This covers a type which was not registered as well as an environment
+    without any registry at all.
+
+    ```no_run
+    # use proxmox_api_macro::api;
+    # use anyhow::Error;
+    # #[derive(Clone)]
+    # struct AuthContext { realm: String }
+    #[api]
+    /// Show which realm the daemon was configured with, if any.
+    fn print_realm(#[state] auth: Option<AuthContext>) -> Result<(), Error> {
+        match auth {
+            Some(auth) => println!("realm: {}", auth.realm),
+            None => println!("no auth context configured"),
+        }
+
+        Ok(())
+    }
+    ```
+
     # Deprecated property aliases
 
     Use this when a property has been renamed and you want to keep the old name accepted for
@@ -504,7 +549,8 @@ fn router_do(item: TokenStream) -> Result<TokenStream, Error> {
 pub fn api(attr: TokenStream_1, item: TokenStream_1) -> TokenStream_1 {
     let _error_guard = init_local_error();
     let item: TokenStream = item.into();
-    handle_error(item.clone(), api::api(attr.into(), item)).into()
+    let fallback = api::strip_helper_attributes(item.clone());
+    handle_error(fallback, api::api(attr.into(), item)).into()
 }
 
 /// *Experimental:* Transform a json-like schema definition into an expression yielding a `Schema`.

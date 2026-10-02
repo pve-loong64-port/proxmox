@@ -941,6 +941,12 @@ impl SchemaArray {
     }
 }
 
+/// Removes the attributes `#[api]` consumes itself, so that the item can be emitted as-is when the
+/// macro fails with a fatal error.
+pub(crate) fn strip_helper_attributes(item: TokenStream) -> TokenStream {
+    method::strip_state_attributes(item)
+}
+
 /// Parse `input`, `returns` and `protected` attributes out of an function annotated
 /// with an `#[api]` attribute and produce a `const ApiMethod` named after the function.
 ///
