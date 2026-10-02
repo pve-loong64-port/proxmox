@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use proxmox_router::{RpcEnvironment, RpcEnvironmentType};
+use proxmox_router::{RpcEnvironment, RpcEnvironmentType, SharedStateRegistry};
 
 use crate::ApiConfig;
 
@@ -88,5 +88,9 @@ impl RpcEnvironment for RestEnvironment {
 
     fn get_client_ip(&self) -> Option<SocketAddr> {
         self.client_ip
+    }
+
+    fn shared_state(&self) -> Option<&SharedStateRegistry> {
+        self.api.shared_state.as_ref()
     }
 }

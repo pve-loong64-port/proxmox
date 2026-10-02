@@ -17,7 +17,7 @@ use proxmox_daemon::command_socket::CommandSocket;
 use proxmox_http::Body;
 use proxmox_log::{FileLogOptions, FileLogger};
 use proxmox_network_types::Cidr;
-use proxmox_router::{Router, RpcEnvironmentType, UserInformation};
+use proxmox_router::{Router, RpcEnvironmentType, SharedStateRegistry, UserInformation};
 use proxmox_sys::fs::{CreateOptions, create_path};
 
 use crate::RestEnvironment;
@@ -33,6 +33,8 @@ pub struct ApiConfig {
     handlers: Vec<Handler>,
     auth_handler: Option<AuthHandler>,
     index_handler: Option<IndexHandler>,
+    /// State that API handlers can request via a `#[state]` parameter.
+    pub(crate) shared_state: Option<SharedStateRegistry>,
     pub(crate) privileged_addr: Option<PrivilegedAddr>,
     // Name of the auth cookie that should be unset on 401 request. If `None` no cookie will be
     // removed.
@@ -96,6 +98,7 @@ impl ApiConfig {
             index_handler: None,
             privileged_addr: None,
             auth_cookie_name: None,
+            shared_state: None,
 
             real_ip_header,
             real_ip_allow_from: None,
@@ -368,6 +371,15 @@ impl ApiConfig {
     ) -> Self {
         self.handlers
             .push(Handler::unformatted_router(prefix, router));
+        self
+    }
+
+    /// Set the [`SharedStateRegistry`] from which API handlers get their `#[state]` parameters.
+    ///
+    /// All types a handler requests must be registered using
+    /// [`SharedStateRegistry::register`], otherwise a call to the API handler will fail.
+    pub fn with_shared_state(mut self, shared_state: SharedStateRegistry) -> Self {
+        self.shared_state = Some(shared_state);
         self
     }
 }
