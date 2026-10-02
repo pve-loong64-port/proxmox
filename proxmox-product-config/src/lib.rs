@@ -5,3 +5,6 @@ pub use filesystem_helpers::*;
 
 mod init;
 pub use init::*;
+
+mod product_config;
+pub use product_config::{ProductConfig, ProductConfigParams};
