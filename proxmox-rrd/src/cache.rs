@@ -59,6 +59,8 @@ impl Cache {
     /// and should return a newly generated RRD if the file does not
     /// exists (or is unreadable). This may generate RRDs with
     /// different configurations (dependent on `rel_path`).
+    ///
+    /// Callbacks run with cache locks held and must not call back into this cache.
     pub fn new<P: AsRef<Path>>(
         basedir: P,
         file_options: Option<CreateOptions>,
@@ -222,14 +224,14 @@ impl Cache {
     ) -> Result<(), Error> {
         validate_rrd_path(rel_path)?;
 
-        let journal_applied = self.apply_journal()?;
+        self.apply_journal()?;
 
-        self.state
-            .write()
-            .unwrap()
-            .append_journal_entry(time, value, dst, rel_path)?;
+        // Replay can finish after apply_journal returns. Read its state under the append lock, and
+        // keep rotation blocked until the map contains the update covered by this journal entry.
+        let mut state = self.state.write().unwrap();
+        state.append_journal_entry(time, value, dst, rel_path)?;
 
-        if journal_applied {
+        if state.journal_applied {
             self.rrd_map
                 .write()
                 .unwrap()

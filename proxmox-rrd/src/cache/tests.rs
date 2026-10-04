@@ -145,6 +145,60 @@ fn valid_metric_paths_round_trip() {
 }
 
 #[test]
+fn update_blocks_rotation_until_applied_to_map() {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    static LOAD_SYNC: Mutex<
+        Option<(
+            crossbeam_channel::Sender<()>,
+            crossbeam_channel::Receiver<()>,
+        )>,
+    > = Mutex::new(None);
+
+    fn blocking_load(_path: &Path, _rel_path: &str) -> Option<Database> {
+        let (entered, release) = LOAD_SYNC.lock().unwrap().take().unwrap();
+        entered.send(()).unwrap();
+        release.recv_timeout(Duration::from_secs(10)).unwrap();
+        None
+    }
+
+    let dir = TestDir::new();
+    let cache = Cache::new(&dir.0, None, None, f64::INFINITY, blocking_load, |dst| {
+        Database::new(dst, vec![Archive::new(AggregationFn::Last, 10, 20)])
+    })
+    .unwrap();
+    apply_journal_impl(Arc::clone(&cache.state), Arc::clone(&cache.rrd_map)).unwrap();
+
+    let (entered_tx, entered_rx) = bounded(1);
+    let (release_tx, release_rx) = bounded(1);
+    *LOAD_SYNC.lock().unwrap() = Some((entered_tx, release_rx));
+    std::thread::scope(|scope| {
+        let writer =
+            scope.spawn(|| cache.update_value("host/value", 110.0, 2.0, DataSourceType::Gauge));
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let rotation_blocked = cache.state.try_write().is_err();
+        release_tx.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        assert!(
+            rotation_blocked,
+            "rotation must not discard an unapplied journal entry"
+        );
+    });
+
+    apply_and_commit_journal_thread(
+        Arc::clone(&cache.config),
+        Arc::clone(&cache.state),
+        Arc::clone(&cache.rrd_map),
+        true,
+    )
+    .unwrap();
+    let database = Database::load(&dir.0.join("host/value"), false).unwrap();
+    assert_eq!(database.last_update(), 110.0);
+    assert_eq!(database.source.last_value, 2.0);
+}
+
+#[test]
 fn journal_round_trip_and_replay() {
     for dst in [
         DataSourceType::Gauge,
