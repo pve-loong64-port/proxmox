@@ -58,6 +58,7 @@ impl FromStr for JournalEntry {
         let dst = match dst {
             0 => DataSourceType::Gauge,
             1 => DataSourceType::Derive,
+            2 => DataSourceType::Counter,
             _ => bail!("got strange value for data source type '{}'", dst),
         };
 
