@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Error, bail, format_err};
 use nix::NixPath;
 use nix::errno::Errno;
-use nix::fcntl::OFlag;
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::sys::stat;
 use nix::unistd;
 use serde_json::Value;
@@ -283,6 +283,19 @@ pub fn atomic_open_or_create_file<P: AsRef<Path>>(
         }
     }
 
+    if oflag.contains(OFlag::O_APPEND) {
+        let result = fcntl(file.as_raw_fd(), FcntlArg::F_GETFL).and_then(|flags| {
+            fcntl(
+                file.as_raw_fd(),
+                FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_APPEND),
+            )
+        });
+        if let Err(err) = result {
+            let _ = unistd::unlink(&temp_file_name);
+            bail!("setting append mode on {:?} failed - {}", path, err);
+        }
+    }
+
     // rotate the file into place, but use `RENAME_NOREPLACE`, so in case 2 processes race against
     // the initialization, the first one wins!
     let rename_result = temp_file_name.with_nix_path(|c_file_name| {
@@ -474,6 +487,62 @@ pub fn file_get_non_comment_lines<P: AsRef<Path>>(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn atomic_open_or_create_file_keeps_append_mode() {
+        use std::io::Seek;
+
+        struct TestDir(PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let dir = TestDir(crate::fs::make_tmp_dir("./tests", None).unwrap());
+        for (index, initial_data) in [b"".as_slice(), b"seed-"].into_iter().enumerate() {
+            for append in [false, true] {
+                let path = dir.0.join(format!("{index}-{append}"));
+                let mut flags = OFlag::O_RDWR | OFlag::O_CLOEXEC;
+                if append {
+                    flags |= OFlag::O_APPEND;
+                }
+                let mut created = atomic_open_or_create_file(
+                    &path,
+                    flags,
+                    initial_data,
+                    CreateOptions::new(),
+                    false,
+                )
+                .unwrap();
+                let actual = fcntl(created.as_raw_fd(), FcntlArg::F_GETFL).unwrap();
+                assert_eq!(
+                    OFlag::from_bits_truncate(actual).contains(OFlag::O_APPEND),
+                    append
+                );
+
+                let mut reopened = atomic_open_or_create_file(
+                    &path,
+                    flags | OFlag::O_APPEND,
+                    b"ignored",
+                    CreateOptions::new(),
+                    false,
+                )
+                .unwrap();
+                reopened.write_all(b"second").unwrap();
+                created.rewind().unwrap();
+                created.write_all(b"first").unwrap();
+
+                let mut expected = [initial_data, b"second"].concat();
+                if append {
+                    expected.extend_from_slice(b"first");
+                } else {
+                    expected[..5].copy_from_slice(b"first");
+                }
+                assert_eq!(std::fs::read(&path).unwrap(), expected);
+            }
+        }
+    }
 
     #[test]
     fn make_tmp_file_does_not_replace_extension() {
