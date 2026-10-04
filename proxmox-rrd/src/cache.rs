@@ -28,6 +28,9 @@ mod tests;
 ///
 /// This cache is designed to run as single instance (no concurrent
 /// access from other processes).
+///
+/// Metric paths must be relative paths with nonempty components other than `.` and `..`, without
+/// control characters. The top-level names `rrd.journal` and `rrd.journal-*` are reserved for journals.
 pub struct Cache {
     config: Arc<CacheConfig>,
     state: Arc<RwLock<JournalState>>,
@@ -217,9 +220,7 @@ impl Cache {
         dst: DataSourceType,
         new_only: bool,
     ) -> Result<(), Error> {
-        if rel_path.contains("../") {
-            bail!("invalid path when trying to update value: {rel_path}");
-        }
+        validate_rrd_path(rel_path)?;
 
         let journal_applied = self.apply_journal()?;
 
@@ -252,6 +253,8 @@ impl Cache {
         start: Option<u64>,
         end: Option<u64>,
     ) -> Result<Option<Entry>, Error> {
+        validate_rrd_path(&format!("{base}/{name}"))?;
+
         let res = {
             let map = self.rrd_map.read().unwrap();
             map.extract_cached_data(base, name, cf, resolution, start, end)?
@@ -271,6 +274,23 @@ impl Cache {
             }
         }
     }
+}
+
+fn validate_rrd_path(rel_path: &str) -> Result<(), Error> {
+    if rel_path.chars().any(char::is_control)
+        || rel_path
+            .split('/')
+            .any(|part| matches!(part, "" | "." | ".."))
+    {
+        bail!("invalid RRD path: {rel_path:?}");
+    }
+
+    let first = rel_path.split('/').next().unwrap();
+    if first == "rrd.journal" || first.starts_with("rrd.journal-") {
+        bail!("reserved RRD path: {rel_path:?}");
+    }
+
+    Ok(())
 }
 
 fn apply_and_commit_journal_thread(

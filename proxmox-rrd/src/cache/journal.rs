@@ -15,7 +15,7 @@ use proxmox_sys::fs::atomic_open_or_create_file;
 
 const RRD_JOURNAL_NAME: &str = "rrd.journal";
 
-use crate::cache::CacheConfig;
+use crate::cache::{CacheConfig, validate_rrd_path};
 use crate::rrd::DataSourceType;
 
 // shared state behind RwLock
@@ -38,7 +38,7 @@ impl FromStr for JournalEntry {
     type Err = Error;
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
-        let line = line.trim();
+        let line = line.strip_suffix('\n').unwrap_or(line);
 
         let parts: Vec<&str> = line.splitn(4, ':').collect();
         if parts.len() != 4 {
@@ -62,6 +62,7 @@ impl FromStr for JournalEntry {
             _ => bail!("got strange value for data source type '{}'", dst),
         };
 
+        validate_rrd_path(parts[3])?;
         let rel_path = parts[3].to_string();
 
         Ok(JournalEntry {
@@ -106,6 +107,7 @@ impl JournalState {
         dst: DataSourceType,
         rel_path: &str,
     ) -> Result<(), Error> {
+        validate_rrd_path(rel_path)?;
         let journal_entry = format!("{}:{}:{}:{}\n", time, value, dst as u8, rel_path);
         if let Err(err) = self.journal.write_all(journal_entry.as_bytes()) {
             if let Err(truncate_err) = truncate_incomplete_entry(&self.journal) {
