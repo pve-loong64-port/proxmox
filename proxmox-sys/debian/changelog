@@ -1,3 +1,11 @@
+rust-proxmox-sys (1.0.3-1) trixie; urgency=medium
+
+  * fs: preserve append mode when atomically creating files, preventing
+    concurrent writers from overwriting data and avoiding gaps after a
+    failed write is truncated.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 07 Oct 2026 16:59:23 +0200
+
 rust-proxmox-sys (1.0.2-1) trixie; urgency=medium
 
   * fix #7690: fs: replace_file: close the temporary file before renaming or
