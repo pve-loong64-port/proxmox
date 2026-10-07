@@ -1,3 +1,25 @@
+rust-proxmox-rrd (1.0.3-1) trixie; urgency=medium
+
+  * journal: discard incomplete trailing entries before appending after
+    a crash or failed write, preventing corrupt timestamps and lost
+    metric updates.
+
+  * journal: replay counter data sources instead of skipping their
+    pending updates during startup.
+
+  * cache: reject unsafe metric paths on updates, reads, and replay,
+    preventing journal record injection through metric names and access
+    via absolute or parent-directory paths.
+
+  * cache: serialize journal appends and in-memory updates with replay
+    completion and journal rotation to avoid dropping updates during
+    startup or losing recovery records before the data is saved.
+
+  * build: switch to Rust 2024 and update the minimum dependency
+    versions to proxmox-schema 5.4.0 and proxmox-sys 1.0.1.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 07 Oct 2026 16:56:24 +0200
+
 rust-proxmox-rrd (1.0.2-1) trixie; urgency=medium
 
   * update value: restrict relative archive file path.
