@@ -1,3 +1,20 @@
+rust-proxmox-product-config (1.1.0-1) trixie; urgency=medium
+
+  * add a ProductConfig type holding the API and privileged users and the
+    configuration, state, runtime and cache directories, and providing the
+    matching file and directory creation options. Applications can keep it in
+    their own context instead of relying on global state, which also allows
+    tests to use temporary directories and the current user.
+
+  * update to edition 2024.
+
+  * documentation: correct the stated owners and permissions of the file and
+    lock file helpers. For example, replace_config() creates files with mode
+    0640, not 0660, and files of the privileged helpers are owned by the
+    configured privileged user, which is not necessarily root.
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 12 Oct 2026 18:35:33 +0200
+
 rust-proxmox-product-config (1.0.0-1) trixie; urgency=medium
 
   * re-build for Debian Trixie based releases.
