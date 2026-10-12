@@ -43,9 +43,9 @@ Provides:
  librust-proxmox-schema-5.4-dev (= ${binary:Version}),
  librust-proxmox-schema-5.4+default-dev (= ${binary:Version}),
  librust-proxmox-schema-5.4+test-harness-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0+default-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0+test-harness-dev (= ${binary:Version})
+ librust-proxmox-schema-5.4.1-dev (= ${binary:Version}),
+ librust-proxmox-schema-5.4.1+default-dev (= ${binary:Version}),
+ librust-proxmox-schema-5.4.1+test-harness-dev (= ${binary:Version})
 Description: Proxmox api schema and validation - Rust source code
  Source code for Debianized Rust crate "proxmox-schema"
 
@@ -55,11 +55,11 @@ Multi-Arch: same
 Depends:
  ${misc:Depends},
  librust-proxmox-schema-dev (= ${binary:Version}),
- librust-proxmox-api-macro-1+default-dev (>= 1.6.1-~~)
+ librust-proxmox-api-macro-1+default-dev (>= 1.7.0-~~)
 Provides:
  librust-proxmox-schema-5+api-macro-dev (= ${binary:Version}),
  librust-proxmox-schema-5.4+api-macro-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0+api-macro-dev (= ${binary:Version})
+ librust-proxmox-schema-5.4.1+api-macro-dev (= ${binary:Version})
 Description: Proxmox api schema and validation - feature "api-macro"
  This metapackage enables feature "api-macro" for the Rust proxmox-schema crate,
  by pulling in any additional dependencies needed by that feature.
@@ -74,7 +74,7 @@ Depends:
 Provides:
  librust-proxmox-schema-5+api-types-dev (= ${binary:Version}),
  librust-proxmox-schema-5.4+api-types-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0+api-types-dev (= ${binary:Version})
+ librust-proxmox-schema-5.4.1+api-types-dev (= ${binary:Version})
 Description: Proxmox api schema and validation - feature "api-types"
  This metapackage enables feature "api-types" for the Rust proxmox-schema crate,
  by pulling in any additional dependencies needed by that feature.
@@ -91,7 +91,7 @@ Depends:
 Provides:
  librust-proxmox-schema-5+upid-api-impl-dev (= ${binary:Version}),
  librust-proxmox-schema-5.4+upid-api-impl-dev (= ${binary:Version}),
- librust-proxmox-schema-5.4.0+upid-api-impl-dev (= ${binary:Version})
+ librust-proxmox-schema-5.4.1+upid-api-impl-dev (= ${binary:Version})
 Description: Proxmox api schema and validation - feature "upid-api-impl"
  This metapackage enables feature "upid-api-impl" for the Rust proxmox-schema
  crate, by pulling in any additional dependencies needed by that feature.

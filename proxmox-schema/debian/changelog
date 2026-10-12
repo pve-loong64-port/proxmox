@@ -1,3 +1,10 @@
+rust-proxmox-schema (5.4.1-1) trixie; urgency=medium
+
+  * bump the proxmox-api-macro dependency to 1.7.0, so that the re-exported
+    #[api] macro supports #[state] parameters.
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 12 Oct 2026 18:23:41 +0200
+
 rust-proxmox-schema (5.4.0-1) trixie; urgency=medium
 
   * oneOf: drop support for a plain string variant, added in 5.2.0. The
