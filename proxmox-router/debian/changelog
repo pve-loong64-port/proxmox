@@ -1,3 +1,12 @@
+rust-proxmox-router (3.3.0-1) trixie; urgency=medium
+
+  * add a type-keyed registry for shared state and expose it to API handlers
+    through the RPC environment. This allows passing long-lived application
+    state, like configuration, caches or clients, to handlers without using
+    global variables. A registry can also be set for the CLI environment.
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 12 Oct 2026 18:27:02 +0200
+
 rust-proxmox-router (3.2.9-1) trixie; urgency=medium
 
   * check at compile time that the parameters an API method's permission
