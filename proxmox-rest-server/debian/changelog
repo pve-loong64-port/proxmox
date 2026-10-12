@@ -1,3 +1,10 @@
+rust-proxmox-rest-server (1.2.0-1) trixie; urgency=medium
+
+  * api config: allow setting a shared-state registry, which the REST
+    environment passes on to API handlers.
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 12 Oct 2026 18:31:10 +0200
+
 rust-proxmox-rest-server (1.1.1-1) trixie; urgency=medium
 
   * logging: stop reporting redirects and unchanged responses as failures, and
