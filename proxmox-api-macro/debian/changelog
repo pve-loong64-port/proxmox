@@ -1,3 +1,17 @@
+rust-proxmox-api-macro (1.7.0-1) trixie; urgency=medium
+
+  * support #[state] parameters, which API handlers use to declare the
+    long-lived application state they depend on. Such parameters are looked
+    up in the shared-state registry of the RPC environment instead of being
+    read from the request parameters. An Option<T> state parameter is None if
+    no value of type T is available.
+
+  * recognize std::option::Option and core::option::Option as Option types,
+    so that, for example, struct fields of such types are optional like with
+    a bare Option.
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 12 Oct 2026 18:19:20 +0200
+
 rust-proxmox-api-macro (1.6.1-1) trixie; urgency=medium
 
   * support allOf and oneOf in json_schema! macro
