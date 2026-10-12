@@ -129,6 +129,42 @@ fn renamed_struct() {
 }
 
 #[api]
+/// An example of a struct with fully qualified Option types.
+pub struct QualifiedOptionStruct {
+    /// An optional value using the std path.
+    std_option: std::option::Option<String>,
+
+    /// An optional value using the absolute core path.
+    core_option: ::core::option::Option<String>,
+}
+
+#[test]
+fn qualified_option_struct() {
+    const TEST_SCHEMA: ::proxmox_schema::Schema = ::proxmox_schema::ObjectSchema::new(
+        "An example of a struct with fully qualified Option types.",
+        &[
+            (
+                "core_option",
+                true,
+                &::proxmox_schema::StringSchema::new(
+                    "An optional value using the absolute core path.",
+                )
+                .schema(),
+            ),
+            (
+                "std_option",
+                true,
+                &::proxmox_schema::StringSchema::new("An optional value using the std path.")
+                    .schema(),
+            ),
+        ],
+    )
+    .schema();
+
+    assert_eq!(TEST_SCHEMA, QualifiedOptionStruct::API_SCHEMA);
+}
+
+#[api]
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 /// A selection of either 'onekind', 'another-kind' or 'selection-number-three'.

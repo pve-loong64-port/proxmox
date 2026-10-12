@@ -585,7 +585,11 @@ pub fn is_option_type(ty: &syn::Type) -> Option<&syn::Type> {
         let segs = &p.path.segments;
         let is_option = match segs.len() {
             1 => segs.last().unwrap().ident == "Option",
-            2 => segs.first().unwrap().ident == "std" && segs.last().unwrap().ident == "Option",
+            3 => {
+                (segs[0].ident == "std" || segs[0].ident == "core")
+                    && segs[1].ident == "option"
+                    && segs[2].ident == "Option"
+            }
             _ => false,
         };
         if !is_option {
