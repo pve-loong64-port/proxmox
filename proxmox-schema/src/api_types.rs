@@ -123,8 +123,8 @@ const_regex! {
     /// specified in the RFC.
     pub GENERIC_URI_REGEX = r#"^[^\x00-\x1F\x7F <>#"]*$"#;
 
-    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+)$";
-    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?)$";
+    pub BLOCKDEVICE_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+)|(?:nvme\d+n\d+))$";
+    pub BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX = r"^(?:(?:(?:h|s|x?v)d[a-z]+\d*)|(?:nvme\d+n\d+(p\d+)?))$";
 
     /// Regex to match a base64-encoded ED25519 key.
     /// A ED25519 key has always 32 bytes of raw key material, base64 needs 4 * (n / 3) characters
@@ -304,6 +304,35 @@ fn test_regexes() {
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("6zroXbjGs9sdOpr1n/M5hh+UklBxtQ90tGQDnYzJfw=="));
     // 33 bytes of data
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("IiC3Nkh4Fn2ukUZUNmdK5K5CWO53Zmk/eGlKO4m6aCD/"));
+}
+
+#[test]
+fn test_blockdevice_name_regexes() {
+    for name in ["sda", "sdaa", "hdb", "vdc", "xvda", "nvme0n1", "nvme10n12"] {
+        assert!(BLOCKDEVICE_NAME_REGEX.is_match(name), "{name:?}");
+        assert!(BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX.is_match(name), "{name:?}");
+    }
+
+    for name in ["sda1", "xvda12", "nvme0n1p1"] {
+        assert!(!BLOCKDEVICE_NAME_REGEX.is_match(name), "{name:?}");
+        assert!(BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX.is_match(name), "{name:?}");
+    }
+
+    // both alternatives must be anchored at start and end
+    for name in [
+        "",
+        "sda/../../dev/foo",
+        "sda; reboot",
+        "sda\n",
+        "/dev/sda",
+        "junk-nvme0n1",
+        "nvme0n1/../sda",
+        "sda1/../foo",
+        "nvme0n1p1 foo",
+    ] {
+        assert!(!BLOCKDEVICE_NAME_REGEX.is_match(name), "{name:?}");
+        assert!(!BLOCKDEVICE_DISK_AND_PARTITION_NAME_REGEX.is_match(name), "{name:?}");
+    }
 }
 
 #[test]
