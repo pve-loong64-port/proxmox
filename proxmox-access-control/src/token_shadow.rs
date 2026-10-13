@@ -4,7 +4,7 @@ use anyhow::{Error, bail, format_err};
 use serde_json::{Value, from_value};
 
 use proxmox_auth_api::types::Authid;
-use proxmox_product_config::{ApiLockGuard, open_api_lockfile, replace_config};
+use proxmox_product_config::{ApiLockGuard, open_api_lockfile, replace_privileged_config};
 
 use crate::init::impl_feature::{token_shadow, token_shadow_lock};
 
@@ -27,7 +27,7 @@ fn read_file() -> Result<HashMap<Authid, String>, Error> {
 
 fn write_file(data: HashMap<Authid, String>) -> Result<(), Error> {
     let json = serde_json::to_vec(&data)?;
-    replace_config(token_shadow(), &json)
+    replace_privileged_config(token_shadow(), &json)
 }
 
 /// Verifies that an entry for given tokenid / API token secret exists
