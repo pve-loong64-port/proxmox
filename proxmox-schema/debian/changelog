@@ -1,3 +1,12 @@
+rust-proxmox-schema (5.4.2-1) trixie; urgency=medium
+
+  * api types: anchor both alternatives of the block device name regexes.
+    Previously, any value starting with an sd, hd, vd or xvd disk name, or
+    ending with an NVMe namespace name, passed validation, and the disk-only
+    variant also accepted partitions.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 14 Oct 2026 09:39:44 +0200
+
 rust-proxmox-schema (5.4.1-1) trixie; urgency=medium
 
   * bump the proxmox-api-macro dependency to 1.7.0, so that the re-exported
