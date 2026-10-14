@@ -1,3 +1,16 @@
+rust-proxmox-http (1.0.7-1) trixie; urgency=medium
+
+  * sync client:
+    - allow returning HTTP 4xx and 5xx responses to the caller instead of
+      turning them into errors, for example to honor a Retry-After header.
+    - allow limiting how many redirects are followed. With a limit of zero, the
+      redirect response is returned so the caller can check its target first.
+    - allow reusing the agent and its connection pool across requests.
+    - add a helper that recognizes request and body-read timeouts without
+      depending on the underlying transport.
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 14 Oct 2026 21:13:54 +0200
+
 rust-proxmox-http (1.0.6-1) trixie; urgency=medium
 
   * move over http-proxy schema for reuse guarded by api-types feature

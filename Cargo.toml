@@ -171,7 +171,7 @@ proxmox-const-utils = { version = "0.1.0", path = "proxmox-const-utils" }
 proxmox-daemon = { version = "1.0.0", path = "proxmox-daemon" }
 proxmox-disks = { version = "0.2.0", path = "proxmox-disks" }
 proxmox-fixed-string = { version = "0.1.0", path = "proxmox-fixed-string" }
-proxmox-http = { version = "1.0.5", path = "proxmox-http" }
+proxmox-http = { version = "1.0.7", path = "proxmox-http" }
 proxmox-http-error = { version = "1.0.0", path = "proxmox-http-error" }
 proxmox-human-byte = { version = "1.0.0", path = "proxmox-human-byte" }
 proxmox-ini = { version = "0.1.1", path = "proxmox-ini" }
