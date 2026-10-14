@@ -129,7 +129,7 @@ const_regex! {
     /// Regex to match a base64-encoded ED25519 key.
     /// A ED25519 key has always 32 bytes of raw key material, base64 needs 4 * (n / 3) characters
     /// to represent n bytes -> 4 * (32 / 3) = 42.6.., thus 43 + 1 padding character.
-    pub ED25519_BASE64_KEY_REGEX =r"^[a-zA-Z0-9+/-]{43}=";
+    pub ED25519_BASE64_KEY_REGEX =r"^[a-zA-Z0-9+/-]{43}=$";
 }
 
 pub const SAFE_ID_FORMAT: ApiStringFormat = ApiStringFormat::Pattern(&SAFE_ID_REGEX);
@@ -304,6 +304,9 @@ fn test_regexes() {
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("6zroXbjGs9sdOpr1n/M5hh+UklBxtQ90tGQDnYzJfw=="));
     // 33 bytes of data
     assert!(!ED25519_BASE64_KEY_REGEX.is_match("IiC3Nkh4Fn2ukUZUNmdK5K5CWO53Zmk/eGlKO4m6aCD/"));
+    // valid key with trailing data
+    assert!(!ED25519_BASE64_KEY_REGEX.is_match("KNpc7alqlLTaWE6RzuzHGioKs7Nqh/z3YxMJojpSelA=;x"));
+    assert!(!ED25519_BASE64_KEY_REGEX.is_match("KNpc7alqlLTaWE6RzuzHGioKs7Nqh/z3YxMJojpSelA=\n"));
 }
 
 #[test]
